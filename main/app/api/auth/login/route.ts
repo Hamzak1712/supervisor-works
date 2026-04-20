@@ -29,6 +29,8 @@ export async function POST(req: Request) {
         email: true,
         passwordHash: true,
         role: true,
+        status: true,
+        sessionVersion: true,
       },
     })
 
@@ -47,10 +49,25 @@ export async function POST(req: Request) {
       )
     }
 
+    if (user.status === "SUSPENDED") {
+      return NextResponse.json(
+        { error: "Your account is suspended. Contact an administrator." },
+        { status: 403 }
+      )
+    }
+
+    if (user.status === "PENDING") {
+      return NextResponse.json(
+        { error: "Your account invitation is pending activation." },
+        { status: 403 }
+      )
+    }
+
     const token = await signToken({
       sub: user.id,
       role: user.role,
       email: user.email,
+      sessionVersion: user.sessionVersion,
     })
 
     return NextResponse.json({

@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Bell, LogOut, Search, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -22,8 +24,71 @@ interface HeaderProps {
 
 export function Header({ user, title }: HeaderProps) {
   const router = useRouter()
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function fetchUnreadCount() {
+      try {
+        const token = localStorage.getItem("token")
+        if (!token) {
+          if (!cancelled) setUnreadCount(0)
+          return
+        }
+
+        const res = await fetch("/api/notifications", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+
+        if (!res.ok) return
+
+        const data = await res.json()
+        const nextUnreadCount =
+          typeof data?.unreadCount === "number"
+            ? data.unreadCount
+            : Array.isArray(data?.notifications)
+              ? data.notifications.filter((n: { read: boolean }) => !n.read)
+                  .length
+              : 0
+
+        if (!cancelled) {
+          setUnreadCount(nextUnreadCount)
+        }
+      } catch (err) {
+        console.error(err)
+      }
+    }
+
+    function handleNotificationsUpdated() {
+      void fetchUnreadCount()
+    }
+
+    void fetchUnreadCount()
+
+    const interval = window.setInterval(() => {
+      void fetchUnreadCount()
+    }, 30000)
+
+    window.addEventListener("focus", handleNotificationsUpdated)
+    window.addEventListener("notifications:updated", handleNotificationsUpdated)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      window.removeEventListener("focus", handleNotificationsUpdated)
+      window.removeEventListener(
+        "notifications:updated",
+        handleNotificationsUpdated
+      )
+    }
+  }, [])
 
   const handleLogout = () => {
+    localStorage.removeItem("token")
+    localStorage.removeItem("userId")
     localStorage.removeItem("userRole")
     localStorage.removeItem("userEmail")
     router.push("/login")
@@ -58,10 +123,16 @@ export function Header({ user, title }: HeaderProps) {
         </div>
 
         {/* Notifications */}
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
-          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
-          <span className="sr-only">Notifications</span>
+        <Button variant="ghost" size="icon" className="relative" asChild>
+          <Link href="/dashboard/notifications">
+            <Bell className="h-5 w-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
+            <span className="sr-only">Notifications</span>
+          </Link>
         </Button>
 
         {/* User Menu */}

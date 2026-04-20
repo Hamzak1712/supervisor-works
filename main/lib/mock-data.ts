@@ -412,7 +412,7 @@ export const mockSystemHealth: SystemHealth[] = [
     service: "Notification Service",
     status: "degraded",
     lastChecked: "2024-12-20T10:30:00Z",
-    uptime: 98.50,
+    uptime: 98.5,
   },
   {
     service: "File Storage",

@@ -33,9 +33,9 @@ const studentNavItems = [
   { href: "/dashboard/student", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/student/profile", label: "My Profile", icon: User },
   { href: "/dashboard/student/project", label: "My Project", icon: FileText },
-  { href: "/dashboard/student/matching", label: "Find Supervisor", icon: Sparkles },
-  { href: "/dashboard/student/timeline", label: "Project Timeline", icon: Calendar },
-  { href: "/dashboard/student/notifications", label: "Notifications", icon: Bell },
+  { href: "/dashboard/student/find-supervisor", label: "Find Supervisor", icon: Sparkles },
+  { href: "/dashboard/student/project-timeline", label: "Project Timeline", icon: Calendar },
+  { href: "/dashboard/notifications", label: "Notifications", icon: Bell },
 ]
 
 const supervisorNavItems = [
@@ -50,8 +50,8 @@ const adminNavItems = [
   { href: "/dashboard/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/admin/users", label: "User Management", icon: UserCog },
   { href: "/dashboard/admin/supervisors", label: "Supervisors", icon: Users },
-  { href: "/dashboard/admin/system", label: "System Health", icon: Activity },
-  { href: "/dashboard/admin/data", label: "Data Management", icon: Database },
+  { href: "/dashboard/admin/system-health", label: "System Health", icon: Activity },
+  { href: "/dashboard/admin/data-management", label: "Data Management", icon: Database },
   { href: "/dashboard/admin/settings", label: "Settings", icon: Shield },
 ]
 

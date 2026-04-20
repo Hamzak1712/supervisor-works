@@ -16,6 +16,7 @@ export async function GET(req: Request) {
         id: true,
         email: true,
         role: true,
+        status: true,
         createdAt: true,
         updatedAt: true,
         studentProfile: {

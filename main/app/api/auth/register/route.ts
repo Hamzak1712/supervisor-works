@@ -100,6 +100,7 @@ export async function POST(req: Request) {
         id: true,
         email: true,
         role: true,
+        sessionVersion: true,
       },
     })
 
@@ -107,6 +108,7 @@ export async function POST(req: Request) {
       sub: createdUser.id,
       email: createdUser.email,
       role: createdUser.role,
+      sessionVersion: createdUser.sessionVersion,
     })
 
     return NextResponse.json({ token, user: createdUser }, { status: 201 })
