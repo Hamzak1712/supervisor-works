@@ -7,7 +7,7 @@ export async function GET(
   context: { params: Promise<{ studentId: string }> }
 ) {
   try {
-    const payload = await verifyTokenFromHeader(req.headers.get("authorization"))
+    const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
 
     if (!payload) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

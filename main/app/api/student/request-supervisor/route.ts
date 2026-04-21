@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { verifyTokenFromHeader, requireRole } from "@/lib/auth"
+import {
+  autoArchiveCompletedAcademicPeriods,
+  getActiveAcademicPeriod,
+} from "@/lib/academic-periods"
 
 export async function POST(req: Request) {
   try {
-    const payload = await verifyTokenFromHeader(req.headers.get("authorization"))
+    const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
 
     if (!payload) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -32,17 +36,141 @@ export async function POST(req: Request) {
       )
     }
 
+    const supervisor = await prisma.user.findUnique({
+      where: { id: supervisorId },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+        supervisorProfile: {
+          select: {
+            acceptingStudents: true,
+          },
+        },
+      },
+    })
+
+    if (!supervisor || supervisor.role !== "SUPERVISOR") {
+      return NextResponse.json(
+        { error: "Supervisor not found" },
+        { status: 404 }
+      )
+    }
+
+    if (supervisor.status !== "ACTIVE") {
+      return NextResponse.json(
+        { error: "Supervisor account is not active" },
+        { status: 400 }
+      )
+    }
+
+    if (supervisor.supervisorProfile?.acceptingStudents === false) {
+      return NextResponse.json(
+        { error: "This supervisor has paused intake for new requests" },
+        { status: 400 }
+      )
+    }
+
+    const blacklistedPair = await prisma.matchingBlacklist.findUnique({
+      where: {
+        studentId_supervisorId: {
+          studentId: payload.sub,
+          supervisorId,
+        },
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    if (blacklistedPair) {
+      return NextResponse.json(
+        { error: "This pairing is blocked by administrator policy." },
+        { status: 403 }
+      )
+    }
+
+    await autoArchiveCompletedAcademicPeriods(prisma)
+
     const project = await prisma.project.findUnique({
       where: { studentId: payload.sub },
       select: {
         id: true,
         title: true,
+        academicPeriodId: true,
+        academicPeriod: {
+          select: {
+            id: true,
+            name: true,
+            isArchived: true,
+            requestSupervisorCutoffAt: true,
+          },
+        },
       },
     })
 
     if (!project) {
       return NextResponse.json(
         { error: "You need to create a project before sending a request" },
+        { status: 400 }
+      )
+    }
+
+    const activePeriod = await getActiveAcademicPeriod(prisma)
+
+    if (!activePeriod) {
+      return NextResponse.json(
+        {
+          error:
+            "No active academic period is configured. Ask an admin to activate one before sending requests.",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (project.academicPeriod?.isArchived) {
+      return NextResponse.json(
+        {
+          error:
+            "This project belongs to an archived academic period and cannot submit new requests.",
+        },
+        { status: 403 }
+      )
+    }
+
+    const effectiveProjectPeriodId =
+      project.academicPeriodId || activePeriod.id
+
+    if (!project.academicPeriodId) {
+      await prisma.project.update({
+        where: {
+          id: project.id,
+        },
+        data: {
+          academicPeriodId: activePeriod.id,
+        },
+      })
+    }
+
+    if (effectiveProjectPeriodId !== activePeriod.id) {
+      return NextResponse.json(
+        {
+          error:
+            "Your project is not in the currently active academic period. New requests are only allowed in the active period.",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (
+      activePeriod.requestSupervisorCutoffAt &&
+      new Date() > activePeriod.requestSupervisorCutoffAt
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "The supervisor request cut-off date has passed for the active academic period.",
+        },
         { status: 400 }
       )
     }
@@ -72,6 +200,7 @@ export async function POST(req: Request) {
         studentId: payload.sub,
         supervisorId,
         projectId: project.id,
+        academicPeriodId: activePeriod.id,
         status: "pending",
         message,
       },

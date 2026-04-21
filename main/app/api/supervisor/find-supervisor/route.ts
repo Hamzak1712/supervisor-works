@@ -4,7 +4,7 @@ import { verifyTokenFromHeader, requireRole } from "@/lib/auth"
 
 export async function GET(req: Request) {
   try {
-    const payload = await verifyTokenFromHeader(req.headers.get("authorization"))
+    const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
 
     if (!payload) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -28,9 +28,31 @@ export async function GET(req: Request) {
       existingRequests.map((r) => [r.supervisorId, r.status])
     )
 
+    const blacklistedPairs = await prisma.matchingBlacklist.findMany({
+      where: {
+        studentId: payload.sub,
+      },
+      select: {
+        supervisorId: true,
+      },
+    })
+
+    const blacklistedSupervisorIds = blacklistedPairs.map(
+      (pair) => pair.supervisorId
+    )
+
     const supervisors = await prisma.user.findMany({
       where: {
         role: "SUPERVISOR",
+        status: "ACTIVE",
+        supervisorProfile: {
+          is: {
+            acceptingStudents: true,
+          },
+        },
+        id: {
+          notIn: blacklistedSupervisorIds,
+        },
       },
       orderBy: {
         createdAt: "desc",
@@ -43,6 +65,7 @@ export async function GET(req: Request) {
             fullName: true,
             expertise: true,
             maxCapacity: true,
+            acceptingStudents: true,
           },
         },
       },
@@ -61,6 +84,7 @@ export async function GET(req: Request) {
         fullName: supervisor.supervisorProfile?.fullName || "Unnamed Supervisor",
         expertise,
         maxCapacity: supervisor.supervisorProfile?.maxCapacity ?? 5,
+        acceptingStudents: supervisor.supervisorProfile?.acceptingStudents ?? true,
         requestStatus: requestMap.get(supervisor.id) || null,
       }
     })

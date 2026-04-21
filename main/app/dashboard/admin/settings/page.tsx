@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { DashboardShell } from "@/components/dashboard/DashboardShell"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -43,6 +43,61 @@ import {
   Trash2,
 } from "lucide-react"
 
+type AcademicPeriod = {
+  id: string
+  name: string
+  startDate: string
+  endDate: string
+  projectEndPolicyAt: string | null
+  requestSupervisorCutoffAt: string | null
+  proposalSubmissionCutoffAt: string | null
+  finalSubmissionAt: string | null
+  isActive: boolean
+  isArchived: boolean
+}
+
+type AcademicPayload = {
+  periods: AcademicPeriod[]
+  activePeriodId: string | null
+}
+
+type AcademicPeriodForm = {
+  name: string
+  startDate: string
+  endDate: string
+  projectEndPolicyAt: string
+  requestSupervisorCutoffAt: string
+  proposalSubmissionCutoffAt: string
+  finalSubmissionAt: string
+}
+
+function toDateInput(value: string | null | undefined) {
+  if (!value) return ""
+  return value.slice(0, 10)
+}
+
+function periodToForm(period: AcademicPeriod): AcademicPeriodForm {
+  return {
+    name: period.name || "",
+    startDate: toDateInput(period.startDate),
+    endDate: toDateInput(period.endDate),
+    projectEndPolicyAt: toDateInput(period.projectEndPolicyAt),
+    requestSupervisorCutoffAt: toDateInput(period.requestSupervisorCutoffAt),
+    proposalSubmissionCutoffAt: toDateInput(period.proposalSubmissionCutoffAt),
+    finalSubmissionAt: toDateInput(period.finalSubmissionAt),
+  }
+}
+
+const blankAcademicForm: AcademicPeriodForm = {
+  name: "",
+  startDate: "",
+  endDate: "",
+  projectEndPolicyAt: "",
+  requestSupervisorCutoffAt: "",
+  proposalSubmissionCutoffAt: "",
+  finalSubmissionAt: "",
+}
+
 export default function AdminSettingsPage() {
   // General
   const [platformName, setPlatformName] = useState("SupervisorMatch")
@@ -60,6 +115,15 @@ export default function AdminSettingsPage() {
   const [registrationDeadline, setRegistrationDeadline] = useState("2025-01-15")
   const [maxProjectsPerStudent, setMaxProjectsPerStudent] = useState("1")
   const [defaultCapacity, setDefaultCapacity] = useState("5")
+  const [academicLoading, setAcademicLoading] = useState(true)
+  const [academicBusy, setAcademicBusy] = useState(false)
+  const [academicError, setAcademicError] = useState("")
+  const [academicNotice, setAcademicNotice] = useState("")
+  const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([])
+  const [activeAcademicPeriodId, setActiveAcademicPeriodId] = useState<string | null>(null)
+  const [selectedAcademicPeriodId, setSelectedAcademicPeriodId] = useState("")
+  const [selectedAcademicForm, setSelectedAcademicForm] = useState<AcademicPeriodForm | null>(null)
+  const [newAcademicForm, setNewAcademicForm] = useState<AcademicPeriodForm>(blankAcademicForm)
 
   // Matching algorithm
   const [matchThreshold, setMatchThreshold] = useState([70])
@@ -87,6 +151,118 @@ export default function AdminSettingsPage() {
   const [aiProvider, setAiProvider] = useState("openai")
 
   const [saved, setSaved] = useState(false)
+
+  const activeAcademicPeriod =
+    academicPeriods.find((period) => period.id === activeAcademicPeriodId) || null
+
+  async function fetchAcademicPeriods() {
+    try {
+      setAcademicLoading(true)
+      setAcademicError("")
+
+      const token = localStorage.getItem("token")
+      const res = await fetch("/api/admin/academic-periods", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      const data = (await res.json()) as AcademicPayload | { error?: string }
+
+      if (!res.ok || !("periods" in data)) {
+        throw new Error((data as { error?: string })?.error || "Failed to load academic periods")
+      }
+
+      setAcademicPeriods(data.periods)
+      setActiveAcademicPeriodId(data.activePeriodId)
+
+      const nextSelectedId =
+        (selectedAcademicPeriodId &&
+          data.periods.some((period) => period.id === selectedAcademicPeriodId) &&
+          selectedAcademicPeriodId) ||
+        data.activePeriodId ||
+        data.periods[0]?.id ||
+        ""
+
+      setSelectedAcademicPeriodId(nextSelectedId)
+
+      const selected = data.periods.find((period) => period.id === nextSelectedId) || null
+      setSelectedAcademicForm(selected ? periodToForm(selected) : null)
+    } catch (err: any) {
+      console.error(err)
+      setAcademicError(err?.message || "Could not load academic period settings.")
+    } finally {
+      setAcademicLoading(false)
+    }
+  }
+
+  async function runAcademicAction(
+    request: {
+      method: "POST" | "PUT"
+      body: Record<string, unknown>
+    },
+    successNotice: string
+  ) {
+    try {
+      setAcademicBusy(true)
+      setAcademicError("")
+
+      const token = localStorage.getItem("token")
+      const res = await fetch("/api/admin/academic-periods", {
+        method: request.method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(request.body),
+      })
+
+      const data = (await res.json()) as AcademicPayload | { error?: string }
+
+      if (!res.ok || !("periods" in data)) {
+        throw new Error((data as { error?: string })?.error || "Action failed")
+      }
+
+      setAcademicPeriods(data.periods)
+      setActiveAcademicPeriodId(data.activePeriodId)
+
+      const selectedId =
+        (selectedAcademicPeriodId &&
+          data.periods.some((period) => period.id === selectedAcademicPeriodId) &&
+          selectedAcademicPeriodId) ||
+        data.activePeriodId ||
+        data.periods[0]?.id ||
+        ""
+
+      setSelectedAcademicPeriodId(selectedId)
+      const selected = data.periods.find((period) => period.id === selectedId) || null
+      setSelectedAcademicForm(selected ? periodToForm(selected) : null)
+
+      setAcademicNotice(successNotice)
+      window.setTimeout(() => setAcademicNotice(""), 2400)
+    } catch (err: any) {
+      console.error(err)
+      setAcademicError(err?.message || "Academic period action failed.")
+    } finally {
+      setAcademicBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchAcademicPeriods()
+  }, [])
+
+  useEffect(() => {
+    if (!selectedAcademicPeriodId) {
+      setSelectedAcademicForm(null)
+      return
+    }
+
+    const selected = academicPeriods.find(
+      (period) => period.id === selectedAcademicPeriodId
+    )
+    setSelectedAcademicForm(selected ? periodToForm(selected) : null)
+  }, [academicPeriods, selectedAcademicPeriodId])
 
   function handleSave() {
     setSaved(true)
@@ -256,8 +432,354 @@ export default function AdminSettingsPage() {
               <TabsContent value="academic" className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Academic Period</CardTitle>
-                    <CardDescription>Term setup, mode, and deadlines</CardDescription>
+                    <CardTitle>Academic Period Management</CardTitle>
+                    <CardDescription>
+                      Create, edit, archive periods and control active cut-off policy dates.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {academicError && (
+                      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                        {academicError}
+                      </div>
+                    )}
+                    {academicNotice && (
+                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700">
+                        {academicNotice}
+                      </div>
+                    )}
+
+                    {academicLoading ? (
+                      <p className="text-sm text-muted-foreground">
+                        Loading academic periods...
+                      </p>
+                    ) : (
+                      <>
+                        <div className="rounded-xl border bg-primary/5 p-4">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                            Active period
+                          </p>
+                          <p className="mt-1 text-base font-semibold">
+                            {activeAcademicPeriod?.name || "No active period"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {activeAcademicPeriod
+                              ? `${toDateInput(activeAcademicPeriod.startDate)} to ${toDateInput(activeAcademicPeriod.endDate)}`
+                              : "Set an active period to bind new projects and requests."}
+                          </p>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Select period to edit</Label>
+                            <Select
+                              value={selectedAcademicPeriodId}
+                              onValueChange={setSelectedAcademicPeriodId}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Choose period" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {academicPeriods.map((period) => (
+                                  <SelectItem key={period.id} value={period.id}>
+                                    {period.name}
+                                    {period.isActive ? " (Active)" : ""}
+                                    {period.isArchived ? " (Archived)" : ""}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        {selectedAcademicForm && (
+                          <div className="space-y-4 rounded-xl border p-4">
+                            <div className="grid gap-4 md:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label>Period name</Label>
+                                <Input
+                                  value={selectedAcademicForm.name}
+                                  onChange={(e) =>
+                                    setSelectedAcademicForm((prev) =>
+                                      prev ? { ...prev, name: e.target.value } : prev
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Start date</Label>
+                                <Input
+                                  type="date"
+                                  value={selectedAcademicForm.startDate}
+                                  onChange={(e) =>
+                                    setSelectedAcademicForm((prev) =>
+                                      prev ? { ...prev, startDate: e.target.value } : prev
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>End date</Label>
+                                <Input
+                                  type="date"
+                                  value={selectedAcademicForm.endDate}
+                                  onChange={(e) =>
+                                    setSelectedAcademicForm((prev) =>
+                                      prev ? { ...prev, endDate: e.target.value } : prev
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Project end-date policy</Label>
+                                <Input
+                                  type="date"
+                                  value={selectedAcademicForm.projectEndPolicyAt}
+                                  onChange={(e) =>
+                                    setSelectedAcademicForm((prev) =>
+                                      prev
+                                        ? { ...prev, projectEndPolicyAt: e.target.value }
+                                        : prev
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Request supervisor cut-off</Label>
+                                <Input
+                                  type="date"
+                                  value={selectedAcademicForm.requestSupervisorCutoffAt}
+                                  onChange={(e) =>
+                                    setSelectedAcademicForm((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            requestSupervisorCutoffAt: e.target.value,
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Proposal submission cut-off</Label>
+                                <Input
+                                  type="date"
+                                  value={selectedAcademicForm.proposalSubmissionCutoffAt}
+                                  onChange={(e) =>
+                                    setSelectedAcademicForm((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            proposalSubmissionCutoffAt: e.target.value,
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Final submission date</Label>
+                                <Input
+                                  type="date"
+                                  value={selectedAcademicForm.finalSubmissionAt}
+                                  onChange={(e) =>
+                                    setSelectedAcademicForm((prev) =>
+                                      prev
+                                        ? { ...prev, finalSubmissionAt: e.target.value }
+                                        : prev
+                                    )
+                                  }
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                size="sm"
+                                disabled={academicBusy || !selectedAcademicPeriodId}
+                                onClick={() =>
+                                  void runAcademicAction(
+                                    {
+                                      method: "PUT",
+                                      body: {
+                                        action: "update_period",
+                                        periodId: selectedAcademicPeriodId,
+                                        ...selectedAcademicForm,
+                                      },
+                                    },
+                                    "Academic period updated."
+                                  )
+                                }
+                              >
+                                Save Period
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={academicBusy || !selectedAcademicPeriodId}
+                                onClick={() =>
+                                  void runAcademicAction(
+                                    {
+                                      method: "PUT",
+                                      body: {
+                                        action: "set_active_period",
+                                        periodId: selectedAcademicPeriodId,
+                                      },
+                                    },
+                                    "Active academic period updated."
+                                  )
+                                }
+                              >
+                                Set Active
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={academicBusy || !selectedAcademicPeriodId}
+                                onClick={() =>
+                                  void runAcademicAction(
+                                    {
+                                      method: "PUT",
+                                      body: {
+                                        action: "archive_period",
+                                        periodId: selectedAcademicPeriodId,
+                                      },
+                                    },
+                                    "Academic period archived."
+                                  )
+                                }
+                              >
+                                Archive Period
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+
+                        <Separator />
+
+                        <div className="space-y-4 rounded-xl border p-4">
+                          <p className="font-medium">Create New Academic Period</p>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>Period name</Label>
+                              <Input
+                                placeholder="e.g. 2026/27"
+                                value={newAcademicForm.name}
+                                onChange={(e) =>
+                                  setNewAcademicForm((prev) => ({
+                                    ...prev,
+                                    name: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Start date</Label>
+                              <Input
+                                type="date"
+                                value={newAcademicForm.startDate}
+                                onChange={(e) =>
+                                  setNewAcademicForm((prev) => ({
+                                    ...prev,
+                                    startDate: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>End date</Label>
+                              <Input
+                                type="date"
+                                value={newAcademicForm.endDate}
+                                onChange={(e) =>
+                                  setNewAcademicForm((prev) => ({
+                                    ...prev,
+                                    endDate: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Project end-date policy</Label>
+                              <Input
+                                type="date"
+                                value={newAcademicForm.projectEndPolicyAt}
+                                onChange={(e) =>
+                                  setNewAcademicForm((prev) => ({
+                                    ...prev,
+                                    projectEndPolicyAt: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Request supervisor cut-off</Label>
+                              <Input
+                                type="date"
+                                value={newAcademicForm.requestSupervisorCutoffAt}
+                                onChange={(e) =>
+                                  setNewAcademicForm((prev) => ({
+                                    ...prev,
+                                    requestSupervisorCutoffAt: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Proposal submission cut-off</Label>
+                              <Input
+                                type="date"
+                                value={newAcademicForm.proposalSubmissionCutoffAt}
+                                onChange={(e) =>
+                                  setNewAcademicForm((prev) => ({
+                                    ...prev,
+                                    proposalSubmissionCutoffAt: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Final submission date</Label>
+                              <Input
+                                type="date"
+                                value={newAcademicForm.finalSubmissionAt}
+                                onChange={(e) =>
+                                  setNewAcademicForm((prev) => ({
+                                    ...prev,
+                                    finalSubmissionAt: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            disabled={academicBusy}
+                            onClick={() =>
+                              void runAcademicAction(
+                                {
+                                  method: "POST",
+                                  body: newAcademicForm,
+                                },
+                                "Academic period created."
+                              ).then(() => {
+                                setNewAcademicForm(blankAcademicForm)
+                              })
+                            }
+                          >
+                            Create Period
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Legacy Academic Controls</CardTitle>
+                    <CardDescription>Existing academic settings still available</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-2">

@@ -1,15 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { DashboardShell } from "@/components/dashboard/DashboardShell"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
-import { Separator } from "@/components/ui/separator"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Select,
   SelectContent,
@@ -17,599 +13,620 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { currentAdmin, mockSupervisors } from "@/lib/mock-data"
-import type { SupervisorProfile } from "@/types"
+import { Separator } from "@/components/ui/separator"
+import type { User } from "@/types"
 import {
   Briefcase,
   Users,
   Search,
-  GraduationCap,
-  FolderOpen,
-  CheckCircle2,
-  Filter,
-  UserPlus,
-  Download,
-  MoreHorizontal,
-  AlertTriangle,
-  Plus,
-  Minus,
   Save,
-  X,
-  Mail,
-  Ban,
-  Pencil,
-  TrendingUp,
-  Building2,
+  PauseCircle,
+  PlayCircle,
+  ArrowRightLeft,
+  ArrowRight,
+  Bell,
+  Clock3,
+  ShieldCheck,
+  AlertTriangle,
 } from "lucide-react"
 
-function getInitials(name: string) {
-  return name
-    .split(" ")
-    .map((p) => p[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase()
+type SupervisorRow = {
+  userId: string
+  email: string
+  status: "ACTIVE" | "SUSPENDED" | "PENDING"
+  fullName: string
+  expertise: string[]
+  maxCapacity: number
+  currentStudents: number
+  remainingSlots: number
+  acceptingStudents: boolean
+  pendingRequests: number
+  avgResponseDays: number | null
+  responseTimeFlag: boolean
 }
 
-interface SupervisorRow extends SupervisorProfile {
-  status: "active" | "suspended"
-  acceptingStudents: boolean
+type PendingApplication = {
+  userId: string
+  email: string
+  fullName: string
+  createdAt: string
+}
+
+type StudentOption = {
+  userId: string
+  email: string
+  fullName: string
+  supervisorId: string | null
+}
+
+type ApiResponse = {
+  supervisors: SupervisorRow[]
+  pendingApplications: PendingApplication[]
+  students: StudentOption[]
+  summary: {
+    totalSupervisors: number
+    acceptingSupervisors: number
+    pausedIntake: number
+    flaggedResponseTime: number
+    totalCapacity: number
+    totalAssigned: number
+  }
+}
+
+const fallbackShellUser: User = {
+  id: "admin",
+  email: "admin@example.com",
+  name: "Admin",
+  role: "admin",
+  createdAt: new Date(0).toISOString(),
 }
 
 export default function AdminSupervisorsPage() {
-  const initial: SupervisorRow[] = useMemo(
-    () =>
-      mockSupervisors.map((s) => ({
-        ...s,
-        status: "active",
-        acceptingStudents: s.currentStudents < s.maxStudents,
-      })),
-    [],
-  )
+  const [shellUser, setShellUser] = useState<User>(fallbackShellUser)
+  const [supervisors, setSupervisors] = useState<SupervisorRow[]>([])
+  const [students, setStudents] = useState<StudentOption[]>([])
+  const [pendingApplications, setPendingApplications] = useState<PendingApplication[]>([])
+  const [summary, setSummary] = useState<ApiResponse["summary"]>({
+    totalSupervisors: 0,
+    acceptingSupervisors: 0,
+    pausedIntake: 0,
+    flaggedResponseTime: 0,
+    totalCapacity: 0,
+    totalAssigned: 0,
+  })
 
-  const [supervisors, setSupervisors] = useState<SupervisorRow[]>(initial)
   const [search, setSearch] = useState("")
-  const [departmentFilter, setDepartmentFilter] = useState("all")
-  const [capacityFilter, setCapacityFilter] = useState("all")
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<number>(0)
+  const [intakeFilter, setIntakeFilter] = useState("all")
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [actionNotice, setActionNotice] = useState("")
+  const [busy, setBusy] = useState(false)
 
-  const departments = useMemo(() => Array.from(new Set(supervisors.map((s) => s.department))), [supervisors])
+  const [capacityDrafts, setCapacityDrafts] = useState<Record<string, string>>({})
 
-  const filtered = useMemo(() => {
+  const [selectedStudentId, setSelectedStudentId] = useState("")
+  const [targetSupervisorId, setTargetSupervisorId] = useState("")
+  const [fromSupervisorId, setFromSupervisorId] = useState("")
+  const [toSupervisorId, setToSupervisorId] = useState("")
+
+  const authHeaders = () => {
+    const token = localStorage.getItem("token")
+    return {
+      Authorization: `Bearer ${token}`,
+    }
+  }
+
+  function hydrate(data: ApiResponse) {
+    setSupervisors(data.supervisors || [])
+    setStudents(data.students || [])
+    setPendingApplications(data.pendingApplications || [])
+    setSummary(data.summary)
+    setCapacityDrafts((prev) => {
+      const next: Record<string, string> = { ...prev }
+      data.supervisors.forEach((sup) => {
+        if (!next[sup.userId]) {
+          next[sup.userId] = String(sup.maxCapacity)
+        }
+      })
+      return next
+    })
+  }
+
+  async function fetchData(showLoading = false) {
+    try {
+      if (showLoading) setLoading(true)
+      setError("")
+
+      const token = localStorage.getItem("token")
+      const [meRes, supervisorsRes] = await Promise.all([
+        fetch("/api/auth/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch("/api/admin/supervisors", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ])
+
+      const meData = await meRes.json()
+      const supervisorsData = (await supervisorsRes.json()) as ApiResponse | { error?: string }
+
+      if (!supervisorsRes.ok || !("supervisors" in supervisorsData)) {
+        throw new Error((supervisorsData as { error?: string })?.error || "Failed to load supervisors")
+      }
+
+      if (meRes.ok) {
+        const meUser = meData.user
+        setShellUser({
+          id: meUser?.id || fallbackShellUser.id,
+          email: meUser?.email || fallbackShellUser.email,
+          name: meUser?.email?.split("@")?.[0] || fallbackShellUser.name,
+          role: "admin",
+          createdAt:
+            typeof meUser?.createdAt === "string"
+              ? meUser.createdAt
+              : fallbackShellUser.createdAt,
+          avatarUrl: "/placeholder.svg",
+        })
+      }
+
+      hydrate(supervisorsData)
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.message || "Could not load supervisors.")
+    } finally {
+      if (showLoading) setLoading(false)
+    }
+  }
+
+  async function runAction(payload: Record<string, unknown>, successMessage: string) {
+    try {
+      setBusy(true)
+      setError("")
+
+      const res = await fetch("/api/admin/supervisors", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+        body: JSON.stringify(payload),
+      })
+
+      const data = (await res.json()) as ApiResponse | { error?: string }
+
+      if (!res.ok || !("supervisors" in data)) {
+        throw new Error((data as { error?: string })?.error || "Action failed")
+      }
+
+      hydrate(data)
+      setActionNotice(successMessage)
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.message || "Action failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchData(true)
+
+    const intervalId = window.setInterval(() => {
+      void fetchData()
+    }, 7000)
+
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  const filteredSupervisors = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return supervisors.filter((s) => {
-      if (departmentFilter !== "all" && s.department !== departmentFilter) return false
-      if (capacityFilter === "available" && s.currentStudents >= s.maxStudents) return false
-      if (capacityFilter === "full" && s.currentStudents < s.maxStudents) return false
-      if (capacityFilter === "low" && s.currentStudents / s.maxStudents > 0.5) return false
+
+    return supervisors.filter((sup) => {
+      if (intakeFilter === "accepting" && !sup.acceptingStudents) return false
+      if (intakeFilter === "paused" && sup.acceptingStudents) return false
+      if (intakeFilter === "slow" && !sup.responseTimeFlag) return false
       if (!q) return true
+
       return (
-        s.name.toLowerCase().includes(q) ||
-        s.email.toLowerCase().includes(q) ||
-        s.department.toLowerCase().includes(q) ||
-        s.expertise.some((e) => e.toLowerCase().includes(q)) ||
-        s.researchAreas.some((r) => r.toLowerCase().includes(q))
+        sup.fullName.toLowerCase().includes(q) ||
+        sup.email.toLowerCase().includes(q) ||
+        sup.expertise.some((item) => item.toLowerCase().includes(q))
       )
     })
-  }, [supervisors, search, departmentFilter, capacityFilter])
+  }, [supervisors, search, intakeFilter])
 
-  const totals = useMemo(() => {
-    const totalCapacity = supervisors.reduce((sum, s) => sum + s.maxStudents, 0)
-    const totalAssigned = supervisors.reduce((sum, s) => sum + s.currentStudents, 0)
-    return {
-      total: supervisors.length,
-      assigned: totalAssigned,
-      capacity: totalCapacity,
-      remaining: totalCapacity - totalAssigned,
-      utilization: Math.round((totalAssigned / totalCapacity) * 100),
-      atCapacity: supervisors.filter((s) => s.currentStudents >= s.maxStudents).length,
-      notAccepting: supervisors.filter((s) => !s.acceptingStudents).length,
-    }
-  }, [supervisors])
+  const activeSupervisors = supervisors.filter((s) => s.status === "ACTIVE")
 
-  function startEdit(sup: SupervisorRow) {
-    setEditingId(sup.id)
-    setEditDraft(sup.maxStudents)
+  const assignableStudents = students.filter(
+    (student) => !targetSupervisorId || student.supervisorId !== targetSupervisorId
+  )
+
+  function pct(current: number, max: number) {
+    const safeMax = max > 0 ? max : 1
+    return Math.round((current / safeMax) * 100)
   }
 
-  function saveEdit(id: string) {
-    setSupervisors((prev) =>
-      prev.map((s) =>
-        s.id === id
-          ? {
-              ...s,
-              maxStudents: Math.max(s.currentStudents, editDraft),
-              acceptingStudents: s.currentStudents < Math.max(s.currentStudents, editDraft),
-            }
-          : s,
-      ),
-    )
-    setEditingId(null)
-  }
-
-  function adjustCapacity(id: string, delta: number) {
-    setSupervisors((prev) =>
-      prev.map((s) =>
-        s.id === id
-          ? {
-              ...s,
-              maxStudents: Math.max(s.currentStudents, s.maxStudents + delta),
-            }
-          : s,
-      ),
+  if (loading) {
+    return (
+      <DashboardShell user={shellUser} role="admin" title="Supervisor Management">
+        <div className="p-6">Loading supervisor management...</div>
+      </DashboardShell>
     )
   }
-
-  function toggleAccepting(id: string) {
-    setSupervisors((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, acceptingStudents: !s.acceptingStudents } : s)),
-    )
-  }
-
-  function suspend(id: string) {
-    setSupervisors((prev) => prev.map((s) => (s.id === id ? { ...s, status: "suspended" } : s)))
-  }
-
-  const topLoad = [...supervisors]
-    .sort((a, b) => b.currentStudents / b.maxStudents - a.currentStudents / a.maxStudents)
-    .slice(0, 3)
 
   return (
-    <DashboardShell user={currentAdmin} role="admin" title="Supervisors">
+    <DashboardShell user={shellUser} role="admin" title="Supervisor Management">
       <div className="space-y-6">
-        {/* Header actions */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-2xl font-bold">Supervisor Management</h2>
-            <p className="text-sm text-muted-foreground">
-              Adjust capacity, expertise, and availability across all supervisors
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline">
-              <Download className="mr-2 h-4 w-4" />
-              Export
-            </Button>
-            <Button>
-              <UserPlus className="mr-2 h-4 w-4" />
-              Add supervisor
-            </Button>
-          </div>
-        </div>
+        {error && (
+          <Card className="border-red-500/30">
+            <CardContent className="p-4 text-sm text-red-500">{error}</CardContent>
+          </Card>
+        )}
 
-        {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard
-            icon={Briefcase}
-            label="Total Supervisors"
-            value={totals.total}
-            hint={`${totals.notAccepting} not accepting`}
-            tone="primary"
-          />
-          <StatCard
-            icon={Users}
-            label="Assigned Students"
-            value={totals.assigned}
-            hint={`${totals.utilization}% utilization`}
-            tone="chart-2"
-          />
-          <StatCard
-            icon={CheckCircle2}
-            label="Total Capacity"
-            value={totals.capacity}
-            hint={`${totals.remaining} slots available`}
-            tone="success"
-          />
-          <StatCard
-            icon={AlertTriangle}
-            label="At Capacity"
-            value={totals.atCapacity}
-            hint={totals.atCapacity > 0 ? "Need attention" : "All have headroom"}
-            tone={totals.atCapacity > 0 ? "warning" : "success"}
-          />
+        {actionNotice && (
+          <Card className="border-emerald-500/30">
+            <CardContent className="p-4 text-sm text-emerald-600">{actionNotice}</CardContent>
+          </Card>
+        )}
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <StatCard icon={Briefcase} label="Supervisors" value={summary.totalSupervisors} />
+          <StatCard icon={Users} label="Assigned" value={summary.totalAssigned} />
+          <StatCard icon={ShieldCheck} label="Capacity" value={summary.totalCapacity} />
+          <StatCard icon={PlayCircle} label="Accepting" value={summary.acceptingSupervisors} />
+          <StatCard icon={PauseCircle} label="Intake Paused" value={summary.pausedIntake} />
+          <StatCard icon={Clock3} label=">7d Response" value={summary.flaggedResponseTime} />
         </div>
 
         <div className="grid gap-6 xl:grid-cols-4">
           <div className="space-y-6 xl:col-span-3">
-            {/* Filters */}
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="space-y-3 p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      placeholder="Search by name, department, or expertise..."
+                      placeholder="Search supervisor by name, email, expertise..."
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       className="pl-9"
                     />
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                      <SelectTrigger className="w-[200px]">
-                        <Building2 className="mr-2 h-3.5 w-3.5" />
-                        <SelectValue placeholder="Department" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All departments</SelectItem>
-                        {departments.map((d) => (
-                          <SelectItem key={d} value={d}>
-                            {d}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Select value={capacityFilter} onValueChange={setCapacityFilter}>
-                      <SelectTrigger className="w-[180px]">
-                        <Filter className="mr-2 h-3.5 w-3.5" />
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All capacity</SelectItem>
-                        <SelectItem value="available">Has availability</SelectItem>
-                        <SelectItem value="low">Low load (&lt;50%)</SelectItem>
-                        <SelectItem value="full">At capacity</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <Select value={intakeFilter} onValueChange={setIntakeFilter}>
+                    <SelectTrigger className="w-[190px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="accepting">Accepting intake</SelectItem>
+                      <SelectItem value="paused">Intake paused</SelectItem>
+                      <SelectItem value="slow">Flagged response &gt;7d</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardContent>
             </Card>
 
-            {/* List */}
             <Card>
-              <CardHeader className="pb-4">
-                <CardTitle>Supervisor Roster</CardTitle>
+              <CardHeader>
+                <CardTitle>Supervisor Controls</CardTitle>
                 <CardDescription>
-                  Showing {filtered.length} of {totals.total} supervisors
+                  Capacity control, intake pause/resume, response performance and nudges
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {filtered.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-12 text-center">
-                    <Briefcase className="h-8 w-8 text-muted-foreground" />
-                    <p className="font-medium">No supervisors match your filters</p>
-                  </div>
+                {filteredSupervisors.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No supervisors found.</p>
                 ) : (
-                  filtered.map((sup) => {
-                    const utilization = Math.round((sup.currentStudents / sup.maxStudents) * 100)
-                    const isEditing = editingId === sup.id
-                    return (
-                      <div key={sup.id} className="rounded-xl border p-5 transition hover:bg-muted/20">
-                        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                          <div className="min-w-0 flex-1 space-y-4">
-                            {/* Header */}
-                            <div className="flex items-start gap-3">
-                              <Avatar className="h-12 w-12 shrink-0">
-                                <AvatarImage src={sup.avatarUrl || "/placeholder.svg"} alt={sup.name} />
-                                <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                                  {getInitials(sup.name)}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h3 className="font-semibold">{sup.name}</h3>
-                                  <Badge
-                                    variant="outline"
-                                    className={
-                                      sup.status === "active"
-                                        ? "border-success/30 bg-success/10 text-success"
-                                        : "border-destructive/30 bg-destructive/10 text-destructive"
-                                    }
-                                  >
-                                    {sup.status}
-                                  </Badge>
-                                  {!sup.acceptingStudents && (
-                                    <Badge
-                                      variant="outline"
-                                      className="border-warning/30 bg-warning/10 text-warning"
-                                    >
-                                      Not accepting
-                                    </Badge>
-                                  )}
-                                </div>
-                                <p className="text-sm text-muted-foreground">{sup.email}</p>
-                                <p className="text-xs text-muted-foreground">{sup.department}</p>
-                              </div>
-                            </div>
-
-                            {/* Capacity */}
-                            <div className="rounded-xl border bg-muted/20 p-3">
-                              <div className="mb-2 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <Users className="h-4 w-4 text-primary" />
-                                  <span className="text-sm font-medium">Supervision capacity</span>
-                                </div>
-                                {isEditing ? (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs text-muted-foreground">
-                                      {sup.currentStudents} assigned -
-                                    </span>
-                                    <Input
-                                      type="number"
-                                      min={sup.currentStudents}
-                                      max={20}
-                                      value={editDraft}
-                                      onChange={(e) => setEditDraft(Number(e.target.value))}
-                                      className="h-7 w-16"
-                                    />
-                                    <Button size="sm" className="h-7" onClick={() => saveEdit(sup.id)}>
-                                      <Save className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7"
-                                      onClick={() => setEditingId(null)}
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-7 w-7 p-0 bg-transparent"
-                                      onClick={() => adjustCapacity(sup.id, -1)}
-                                      disabled={sup.maxStudents <= sup.currentStudents}
-                                    >
-                                      <Minus className="h-3 w-3" />
-                                    </Button>
-                                    <span className="min-w-[70px] text-center text-sm font-semibold tabular-nums">
-                                      {sup.currentStudents} / {sup.maxStudents}
-                                    </span>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-7 w-7 p-0 bg-transparent"
-                                      onClick={() => adjustCapacity(sup.id, 1)}
-                                    >
-                                      <Plus className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7"
-                                      onClick={() => startEdit(sup)}
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-                              <Progress
-                                value={utilization}
-                                className={`h-2 ${
-                                  utilization >= 90
-                                    ? "[&>div]:bg-warning"
-                                    : utilization >= 100
-                                      ? "[&>div]:bg-destructive"
-                                      : ""
-                                }`}
-                              />
-                              <p className="mt-1.5 text-xs text-muted-foreground">
-                                {utilization}% utilized - {sup.maxStudents - sup.currentStudents} slot
-                                {sup.maxStudents - sup.currentStudents !== 1 ? "s" : ""} available
-                              </p>
-                            </div>
-
-                            {/* Expertise */}
-                            <div>
-                              <p className="mb-1.5 text-xs font-medium text-muted-foreground">Expertise</p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {sup.expertise.map((tag) => (
-                                  <Badge
-                                    key={tag}
-                                    variant="outline"
-                                    className="border-primary/20 bg-primary/5 text-primary"
-                                  >
-                                    {tag}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Research */}
-                            <div>
-                              <p className="mb-1.5 text-xs font-medium text-muted-foreground">Research areas</p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {sup.researchAreas.map((tag) => (
-                                  <Badge key={tag} variant="secondary" className="font-normal">
-                                    {tag}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Past projects */}
-                            <div className="rounded-xl border bg-background p-3">
-                              <div className="mb-2 flex items-center gap-2">
-                                <FolderOpen className="h-4 w-4 text-muted-foreground" />
-                                <p className="text-sm font-medium">
-                                  Past projects ({sup.pastProjects.length})
-                                </p>
-                              </div>
-                              <div className="space-y-1">
-                                {sup.pastProjects.slice(0, 2).map((p) => (
-                                  <div key={p} className="truncate text-xs text-muted-foreground">
-                                    - {p}
-                                  </div>
-                                ))}
-                                {sup.pastProjects.length > 2 && (
-                                  <div className="text-xs text-muted-foreground">
-                                    +{sup.pastProjects.length - 2} more
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+                  filteredSupervisors.map((sup) => (
+                    <div key={sup.userId} className="rounded-xl border p-4">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold">{sup.fullName}</p>
+                            <Badge variant="outline">{sup.status}</Badge>
+                            {!sup.acceptingStudents && (
+                              <Badge variant="outline" className="border-warning/30 bg-warning/10 text-warning">
+                                Intake Paused
+                              </Badge>
+                            )}
+                            {sup.responseTimeFlag && (
+                              <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">
+                                Slow Response
+                              </Badge>
+                            )}
                           </div>
+                          <p className="text-sm text-muted-foreground">{sup.email}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Requests pending: {sup.pendingRequests} | Avg response:{" "}
+                            {sup.avgResponseDays === null ? "N/A" : `${sup.avgResponseDays.toFixed(1)} days`}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {sup.expertise.length > 0 ? (
+                              sup.expertise.map((tag) => (
+                                <Badge key={tag} variant="secondary" className="text-xs font-normal">
+                                  {tag}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">No expertise tags.</span>
+                            )}
+                          </div>
+                        </div>
 
-                          <div className="flex gap-2 xl:flex-col xl:shrink-0">
-                            <Button variant="outline" size="sm" className="flex-1 xl:flex-none bg-transparent">
-                              <GraduationCap className="mr-2 h-4 w-4" />
-                              View profile
-                            </Button>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min={sup.currentStudents}
+                              value={capacityDrafts[sup.userId] ?? String(sup.maxCapacity)}
+                              onChange={(e) =>
+                                setCapacityDrafts((prev) => ({
+                                  ...prev,
+                                  [sup.userId]: e.target.value,
+                                }))
+                              }
+                              className="w-24"
+                            />
                             <Button
-                              variant="outline"
                               size="sm"
-                              onClick={() => toggleAccepting(sup.id)}
-                              className="flex-1 bg-transparent xl:flex-none"
+                              disabled={busy}
+                              onClick={() => {
+                                const value = Number(capacityDrafts[sup.userId] ?? sup.maxCapacity)
+                                if (!Number.isFinite(value)) return
+                                void runAction(
+                                  {
+                                    action: "update_capacity",
+                                    supervisorId: sup.userId,
+                                    maxCapacity: Math.max(sup.currentStudents, Math.floor(value)),
+                                  },
+                                  `Updated capacity for ${sup.fullName}.`
+                                )
+                              }}
                             >
-                              {sup.acceptingStudents ? "Pause intake" : "Resume intake"}
+                              <Save className="mr-2 h-4 w-4" />
+                              Save
                             </Button>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-48">
-                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem>
-                                  <Mail className="mr-2 h-4 w-4" />
-                                  Email supervisor
-                                </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <Pencil className="mr-2 h-4 w-4" />
-                                  Manage expertise
-                                </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <Users className="mr-2 h-4 w-4" />
-                                  Reassign students
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => suspend(sup.id)}
-                                  className="text-destructive focus:text-destructive"
-                                >
-                                  <Ban className="mr-2 h-4 w-4" />
-                                  Disable account
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() =>
+                              void runAction(
+                                {
+                                  action: "set_intake",
+                                  supervisorId: sup.userId,
+                                  acceptingStudents: !sup.acceptingStudents,
+                                },
+                                `${sup.acceptingStudents ? "Paused" : "Resumed"} intake for ${sup.fullName}.`
+                              )
+                            }
+                          >
+                            {sup.acceptingStudents ? (
+                              <>
+                                <PauseCircle className="mr-2 h-4 w-4" />
+                                Pause Intake
+                              </>
+                            ) : (
+                              <>
+                                <PlayCircle className="mr-2 h-4 w-4" />
+                                Resume Intake
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() =>
+                              void runAction(
+                                {
+                                  action: "send_workload_nudge",
+                                  supervisorIds: [sup.userId],
+                                },
+                                `Sent workload nudge to ${sup.fullName}.`
+                              )
+                            }
+                          >
+                            <Bell className="mr-2 h-4 w-4" />
+                            Send Nudge
+                          </Button>
+                          <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                            Load: {sup.currentStudents}/{sup.maxCapacity} ({pct(sup.currentStudents, sup.maxCapacity)}%)
                           </div>
                         </div>
                       </div>
-                    )
-                  })
+                    </div>
+                  ))
                 )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Sidebar */}
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Capacity Overview</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <div className="mb-2 flex items-baseline justify-between">
-                    <span className="text-sm text-muted-foreground">Platform utilization</span>
-                    <span className="text-2xl font-bold tabular-nums">{totals.utilization}%</span>
-                  </div>
-                  <Progress value={totals.utilization} className="h-2" />
-                </div>
-                <Separator />
-                <SummaryRow label="Total supervisors" value={totals.total} />
-                <SummaryRow label="Assigned students" value={totals.assigned} />
-                <SummaryRow label="Capacity remaining" value={totals.remaining} tone="success" />
-                <SummaryRow
-                  label="At capacity"
-                  value={totals.atCapacity}
-                  tone={totals.atCapacity > 0 ? "warning" : undefined}
-                />
-                <SummaryRow
-                  label="Not accepting"
-                  value={totals.notAccepting}
-                  tone={totals.notAccepting > 0 ? "warning" : undefined}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-primary" />
-                  Highest Load
-                </CardTitle>
-                <CardDescription>Supervisors nearing their limit</CardDescription>
+                <CardTitle>Force Assign / Reassign</CardTitle>
+                <CardDescription>
+                  Admin override to manually pair a student with a supervisor
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {topLoad.map((s) => {
-                  const pct = Math.round((s.currentStudents / s.maxStudents) * 100)
-                  return (
-                    <div key={s.id} className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium">{s.name}</span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {s.currentStudents}/{s.maxStudents}
-                        </span>
-                      </div>
-                      <Progress
-                        value={pct}
-                        className={`h-1.5 ${pct >= 90 ? "[&>div]:bg-warning" : ""}`}
-                      />
-                    </div>
-                  )
-                })}
+                <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select student" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignableStudents.map((student) => (
+                      <SelectItem key={student.userId} value={student.userId}>
+                        {student.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={targetSupervisorId} onValueChange={setTargetSupervisorId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select target supervisor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeSupervisors.map((sup) => (
+                      <SelectItem key={sup.userId} value={sup.userId}>
+                        {sup.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  className="w-full"
+                  disabled={busy || !selectedStudentId || !targetSupervisorId}
+                  onClick={() =>
+                    void runAction(
+                      {
+                        action: "assign_student",
+                        studentId: selectedStudentId,
+                        toSupervisorId: targetSupervisorId,
+                      },
+                      "Student assignment updated."
+                    )
+                  }
+                >
+                  <ArrowRight className="mr-2 h-4 w-4" />
+                  Assign Student
+                </Button>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Bulk Tools</CardTitle>
+                <CardTitle>Reassign All Students</CardTitle>
+                <CardDescription>
+                  Bulk transfer when a supervisor leaves or becomes unavailable
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Select value={fromSupervisorId} onValueChange={setFromSupervisorId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="From supervisor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeSupervisors.map((sup) => (
+                      <SelectItem key={sup.userId} value={sup.userId}>
+                        {sup.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={toSupervisorId} onValueChange={setToSupervisorId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="To supervisor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeSupervisors
+                      .filter((sup) => sup.userId !== fromSupervisorId)
+                      .map((sup) => (
+                        <SelectItem key={sup.userId} value={sup.userId}>
+                          {sup.fullName}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={busy || !fromSupervisorId || !toSupervisorId}
+                  onClick={() =>
+                    void runAction(
+                      {
+                        action: "reassign_all_students",
+                        fromSupervisorId,
+                        toSupervisorId,
+                      },
+                      "Bulk reassignment completed."
+                    )
+                  }
+                >
+                  <ArrowRightLeft className="mr-2 h-4 w-4" />
+                  Reassign All
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Pending Supervisor Applications</CardTitle>
+                <CardDescription>
+                  Approve pending supervisors to activate their account
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {pendingApplications.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No pending supervisor applications.</p>
+                ) : (
+                  pendingApplications.map((item) => (
+                    <div key={item.userId} className="rounded-md border p-3">
+                      <p className="text-sm font-medium">{item.fullName}</p>
+                      <p className="text-xs text-muted-foreground">{item.email}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Applied {new Date(item.createdAt).toLocaleDateString()}
+                      </p>
+                      <Button
+                        size="sm"
+                        className="mt-2"
+                        disabled={busy}
+                        onClick={() =>
+                          void runAction(
+                            { action: "approve_supervisor", userId: item.userId },
+                            `Approved ${item.fullName}.`
+                          )
+                        }
+                      >
+                        <ShieldCheck className="mr-2 h-4 w-4" />
+                        Approve Supervisor
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Bulk Nudge</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <Button variant="outline" className="w-full justify-start bg-transparent">
-                  <Mail className="mr-2 h-4 w-4" />
-                  Email all supervisors
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  disabled={busy}
+                  onClick={() =>
+                    void runAction(
+                      { action: "send_workload_nudge" },
+                      "Sent workload balancing nudges."
+                    )
+                  }
+                >
+                  <Bell className="mr-2 h-4 w-4" />
+                  Nudge All Supervisors
                 </Button>
-                <Button variant="outline" className="w-full justify-start bg-transparent">
-                  <TrendingUp className="mr-2 h-4 w-4" />
-                  Review capacity limits
-                </Button>
-                <Button variant="outline" className="w-full justify-start bg-transparent">
-                  <Download className="mr-2 h-4 w-4" />
-                  Export supervisor data
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Admin Guidance</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>
-                  Max capacity cannot drop below the number of currently assigned students. Reassign first if you
-                  need to reduce further.
+                <Separator />
+                <p className="text-xs text-muted-foreground">
+                  Overloaded supervisors get a pause-intake nudge; underloaded supervisors are prompted to review pending requests.
                 </p>
-                <p>
-                  Pausing intake keeps existing students supervised but prevents new requests from being matched to
-                  this supervisor.
-                </p>
+                {summary.flaggedResponseTime > 0 && (
+                  <p className="text-xs text-warning">
+                    <AlertTriangle className="mr-1 inline h-3 w-3" />
+                    {summary.flaggedResponseTime} supervisor(s) flagged for response time over 7 days.
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>
         </div>
-
-        {/* Label import guard */}
-        <span className="hidden">
-          <Label>hidden</Label>
-        </span>
       </div>
     </DashboardShell>
   )
@@ -619,59 +636,22 @@ function StatCard({
   icon: Icon,
   label,
   value,
-  hint,
-  tone,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   value: number
-  hint: string
-  tone: "primary" | "success" | "warning" | "chart-2" | "destructive"
 }) {
-  const toneClasses = {
-    primary: "bg-primary/10 text-primary",
-    success: "bg-success/10 text-success",
-    warning: "bg-warning/10 text-warning",
-    "chart-2": "bg-chart-2/10 text-chart-2",
-    destructive: "bg-destructive/10 text-destructive",
-  }
   return (
     <Card>
-      <CardContent className="flex items-start gap-4 p-5">
-        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${toneClasses[tone]}`}>
+      <CardContent className="flex items-center gap-3 p-4">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Icon className="h-5 w-5" />
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="text-2xl font-bold tabular-nums">{value}</p>
-          <p className="truncate text-xs text-muted-foreground">{hint}</p>
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-xl font-bold tabular-nums">{value}</p>
         </div>
       </CardContent>
     </Card>
-  )
-}
-
-function SummaryRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: number
-  tone?: "success" | "warning" | "destructive"
-}) {
-  const toneClass =
-    tone === "success"
-      ? "text-success"
-      : tone === "warning"
-        ? "text-warning"
-        : tone === "destructive"
-          ? "text-destructive"
-          : "text-foreground"
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`font-semibold tabular-nums ${toneClass}`}>{value}</span>
-    </div>
   )
 }

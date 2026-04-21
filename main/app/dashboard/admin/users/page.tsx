@@ -25,10 +25,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { currentAdmin } from "@/lib/mock-data"
 import {
   Users,
-  UserRound,
   ShieldCheck,
   Search,
   Mail,
@@ -49,6 +47,7 @@ import {
   Filter,
   Trash2,
 } from "lucide-react"
+import type { User } from "@/types"
 
 type UserStatus = "active" | "suspended" | "pending"
 type UserRole = "Student" | "Supervisor" | "Admin"
@@ -74,6 +73,19 @@ type ApiUser = {
 type ApiUserDetails = ApiUser & {
   sessionVersion?: number
   updatedAt?: string
+  assignedStudents?: Array<{
+    id: string
+    fullName?: string | null
+    user: {
+      id: string
+      email: string
+      project?: {
+        id: string
+        title?: string | null
+        status: string
+      } | null
+    }
+  }>
   project?: {
     id: string
     title?: string | null
@@ -104,6 +116,10 @@ type ApiUserDetailsResponse = {
     unreadNotifications: number
     pendingSentRequests: number
     pendingReceivedRequests: number
+    acceptedSentRequests: number
+    declinedSentRequests: number
+    acceptedReceivedRequests: number
+    declinedReceivedRequests: number
     completedMilestones: number
     totalMilestones: number
   }
@@ -115,12 +131,16 @@ interface UnifiedUser {
   email: string
   role: UserRole
   status: UserStatus
-  department: string
   createdAt: string
   avatarUrl?: string
-  primary: string
-  secondary: string
-  lastActive: string
+}
+
+const fallbackShellUser: User = {
+  id: "admin",
+  email: "admin@example.com",
+  name: "Admin",
+  role: "admin",
+  createdAt: new Date(0).toISOString(),
 }
 
 function getInitials(name: string) {
@@ -144,7 +164,7 @@ function splitCsv(value: string | null | undefined) {
   if (!value) return []
   return value
     .split(",")
-    .map((item) => item.trim())
+    .map((part) => part.trim())
     .filter(Boolean)
 }
 
@@ -156,42 +176,14 @@ function mapRole(role: ApiUser["role"]): UserRole {
 
 function mapApiUser(user: ApiUser): UnifiedUser {
   const uiRole = mapRole(user.role)
-
-  const studentSkills = splitCsv(user.studentProfile?.skills)
-  const studentInterests = splitCsv(user.studentProfile?.interests)
-  const supervisorExpertise = splitCsv(user.supervisorProfile?.expertise)
-
-  let name = "Unnamed User"
-  let primary = ""
-  let secondary = ""
-  let department = "School of Computer Science and Engineering"
-
-  if (uiRole === "Student") {
-    name = user.studentProfile?.fullName || "Unnamed Student"
-    primary = "Computing student"
-    secondary =
-      studentSkills.length > 0
-        ? `${studentSkills.length} skill tags`
-        : studentInterests.length > 0
-        ? `${studentInterests.length} interest tags`
-        : "Profile not fully completed"
-  } else if (uiRole === "Supervisor") {
-    name = user.supervisorProfile?.fullName || "Unnamed Supervisor"
-    primary =
-      user.supervisorProfile?.maxCapacity !== null &&
-      user.supervisorProfile?.maxCapacity !== undefined
-        ? `Capacity ${user.supervisorProfile.maxCapacity}`
-        : "Supervisor account"
-    secondary =
-      supervisorExpertise.length > 0
-        ? `${supervisorExpertise.length} expertise tags`
-        : "No expertise tags yet"
-  } else {
-    name = user.email.split("@")[0]
-    department = "System Administration"
-    primary = "Admin account"
-    secondary = "Platform management access"
-  }
+  const name =
+    (uiRole === "Student"
+      ? user.studentProfile?.fullName
+      : uiRole === "Supervisor"
+      ? user.supervisorProfile?.fullName
+      : null) ||
+    user.email.split("@")[0] ||
+    "Unnamed User"
 
   const status: UserStatus =
     user.status === "SUSPENDED"
@@ -206,12 +198,8 @@ function mapApiUser(user: ApiUser): UnifiedUser {
     email: user.email,
     role: uiRole,
     status,
-    department,
     createdAt: formatShortDate(user.createdAt),
     avatarUrl: "",
-    primary,
-    secondary,
-    lastActive: status === "pending" ? "Invitation pending" : "Recently active",
   }
 }
 
@@ -221,6 +209,7 @@ function escapeCsvValue(value: string) {
 }
 
 export default function AdminUsersPage() {
+  const [shellUser, setShellUser] = useState<User>(fallbackShellUser)
   const [users, setUsers] = useState<UnifiedUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -229,12 +218,10 @@ export default function AdminUsersPage() {
   const [search, setSearch] = useState("")
   const [roleFilter, setRoleFilter] = useState<string>("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [departmentFilter, setDepartmentFilter] = useState<string>("all")
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [showInvite, setShowInvite] = useState(false)
   const [inviteEmail, setInviteEmail] = useState("")
   const [inviteRole, setInviteRole] = useState<string>("student")
-  const [inviteDepartment, setInviteDepartment] = useState("")
   const [inviteSent, setInviteSent] = useState(false)
   const [busyIds, setBusyIds] = useState<string[]>([])
 
@@ -257,38 +244,72 @@ export default function AdminUsersPage() {
     )
   }
 
-  async function fetchUsers() {
+  async function fetchUsers(showLoading = false) {
     try {
+      if (showLoading) {
+        setLoading(true)
+      }
       setError("")
+      const token = localStorage.getItem("token")
 
-      const res = await fetch("/api/admin/users", {
-        headers: authHeaders(),
-      })
+      const [meRes, usersRes] = await Promise.all([
+        fetch("/api/auth/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch("/api/admin/users", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ])
 
-      const data = await res.json()
+      const meData = await meRes.json()
+      const usersData = await usersRes.json()
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to load users")
+      if (!usersRes.ok) {
+        throw new Error(usersData?.error || "Failed to load users")
       }
 
-      const apiUsers: ApiUser[] = data.users || []
+      if (meRes.ok) {
+        const meUser = meData.user
+        setShellUser({
+          id: meUser?.id || fallbackShellUser.id,
+          email: meUser?.email || fallbackShellUser.email,
+          name: meUser?.email?.split("@")?.[0] || fallbackShellUser.name,
+          role: "admin",
+          createdAt:
+            typeof meUser?.createdAt === "string"
+              ? meUser.createdAt
+              : fallbackShellUser.createdAt,
+          avatarUrl: "/placeholder.svg",
+        })
+      }
+
+      const apiUsers: ApiUser[] = usersData.users || []
       setUsers(apiUsers.map(mapApiUser))
     } catch (err: any) {
       console.error(err)
       setError(err?.message || "Could not load users.")
     } finally {
-      setLoading(false)
+      if (showLoading) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
-    fetchUsers()
-  }, [])
+    void fetchUsers(true)
 
-  const departments = useMemo(
-    () => Array.from(new Set(users.map((u) => u.department))),
-    [users]
-  )
+    const intervalId = window.setInterval(() => {
+      void fetchUsers()
+    }, 5000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -296,17 +317,14 @@ export default function AdminUsersPage() {
     return users.filter((u) => {
       if (roleFilter !== "all" && u.role.toLowerCase() !== roleFilter) return false
       if (statusFilter !== "all" && u.status !== statusFilter) return false
-      if (departmentFilter !== "all" && u.department !== departmentFilter) return false
       if (!q) return true
 
       return (
         u.name.toLowerCase().includes(q) ||
-        u.email.toLowerCase().includes(q) ||
-        u.department.toLowerCase().includes(q) ||
-        u.role.toLowerCase().includes(q)
+        u.email.toLowerCase().includes(q)
       )
     })
-  }, [users, search, roleFilter, statusFilter, departmentFilter])
+  }, [users, search, roleFilter, statusFilter])
 
   const stats = useMemo(() => {
     return {
@@ -399,10 +417,59 @@ export default function AdminUsersPage() {
     if (selectedIds.length === 0) return
 
     try {
-      await Promise.all(selectedIds.map((id) => setStatus(id, status)))
+      selectedIds.forEach((id) => withBusy(id, true))
+      setError("")
+
+      const apiStatus =
+        status === "suspended"
+          ? "SUSPENDED"
+          : status === "pending"
+          ? "PENDING"
+          : "ACTIVE"
+
+      const res = await fetch("/api/admin/users", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+        body: JSON.stringify({
+          userIds: selectedIds,
+          status: apiStatus,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to update selected users")
+      }
+
+      if (Array.isArray(data?.users)) {
+        const apiUsers = data.users as ApiUser[]
+        const nextById = new Map<string, UnifiedUser>(
+          apiUsers.map((apiUser) => [apiUser.id, mapApiUser(apiUser)])
+        )
+        setUsers((prev) =>
+          prev.map((u) => nextById.get(u.id) ?? u)
+        )
+      }
+
+      if (detailUserId && selectedIds.includes(detailUserId)) {
+        fetchUserDetails(detailUserId)
+      }
+
+      setActionNotice(
+        `${status === "suspended" ? "Suspended" : "Activated"} ${
+          data?.updatedCount || selectedIds.length
+        } user(s).`
+      )
       setSelectedIds([])
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
+      setError(err?.message || "Could not update selected users.")
+    } finally {
+      selectedIds.forEach((id) => withBusy(id, false))
     }
   }
 
@@ -451,7 +518,7 @@ export default function AdminUsersPage() {
       withBusy(id, true)
       setError("")
 
-      const res = await fetch(`/api/admin/users?id=${id}`, {
+      const res = await fetch(`/api/admin/users?userId=${id}`, {
         method: "DELETE",
         headers: authHeaders(),
       })
@@ -500,7 +567,6 @@ export default function AdminUsersPage() {
         body: JSON.stringify({
           email: inviteEmail,
           role: apiRole,
-          department: inviteDepartment,
         }),
       })
 
@@ -513,9 +579,10 @@ export default function AdminUsersPage() {
       setUsers((prev) => [mapApiUser(data.user), ...prev])
       setShowInvite(false)
       setInviteEmail("")
-      setInviteDepartment("")
       setInviteRole("student")
-      setActionNotice(`Invitation sent and pending account created for ${data.user.email}.`)
+      setActionNotice(
+        `Pending account created for ${data.user.email}. Temporary password: ${data.temporaryPassword}`
+      )
     } catch (err: any) {
       console.error(err)
       setError(err?.message || "Could not send invitation.")
@@ -701,11 +768,7 @@ export default function AdminUsersPage() {
       "email",
       "role",
       "status",
-      "department",
-      "primary",
-      "secondary",
       "createdAt",
-      "lastActive",
     ]
 
     const csvRows = [
@@ -716,11 +779,7 @@ export default function AdminUsersPage() {
           u.email,
           u.role,
           u.status,
-          u.department,
-          u.primary,
-          u.secondary,
           u.createdAt,
-          u.lastActive,
         ]
           .map((value) => escapeCsvValue(String(value)))
           .join(",")
@@ -745,14 +804,14 @@ export default function AdminUsersPage() {
 
   if (loading) {
     return (
-      <DashboardShell user={currentAdmin} role="admin" title="User Management">
+      <DashboardShell user={shellUser} role="admin" title="User Management">
         <div className="p-6">Loading users...</div>
       </DashboardShell>
     )
   }
 
   return (
-    <DashboardShell user={currentAdmin} role="admin" title="User Management">
+    <DashboardShell user={shellUser} role="admin" title="User Management">
       <div className="space-y-6">
         {error && (
           <Card className="border-red-500/30">
@@ -790,11 +849,11 @@ export default function AdminUsersPage() {
             <CardHeader>
               <CardTitle className="text-lg">Invite a new user</CardTitle>
               <CardDescription>
-                They&apos;ll receive an onboarding email to set their password
+                Create a pending account with a temporary password
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="invite-email">Email address</Label>
                   <Input
@@ -817,15 +876,6 @@ export default function AdminUsersPage() {
                       <SelectItem value="admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="invite-dept">Department</Label>
-                  <Input
-                    id="invite-dept"
-                    placeholder="School of Computing"
-                    value={inviteDepartment}
-                    onChange={(e) => setInviteDepartment(e.target.value)}
-                  />
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -872,7 +922,7 @@ export default function AdminUsersPage() {
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      placeholder="Search by name, email, department..."
+                      placeholder="Search by name or email..."
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       className="pl-9"
@@ -889,19 +939,6 @@ export default function AdminUsersPage() {
                         <SelectItem value="active">Active</SelectItem>
                         <SelectItem value="pending">Pending</SelectItem>
                         <SelectItem value="suspended">Suspended</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                      <SelectTrigger className="w-[200px]">
-                        <SelectValue placeholder="Department" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All departments</SelectItem>
-                        {departments.map((d) => (
-                          <SelectItem key={d} value={d}>
-                            {d}
-                          </SelectItem>
-                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1060,16 +1097,140 @@ export default function AdminUsersPage() {
                       }
                     />
                     <Separator />
+
+                    {detailUser.role === "STUDENT" && (
+                      <>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Student Profile
+                        </p>
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-muted-foreground">Skills</p>
+                          {splitCsv(detailUser.studentProfile?.skills).length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {splitCsv(detailUser.studentProfile?.skills).map((skill) => (
+                                <Badge key={skill} variant="outline">
+                                  {skill}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">No skills added yet.</p>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-muted-foreground">Interests</p>
+                          {splitCsv(detailUser.studentProfile?.interests).length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {splitCsv(detailUser.studentProfile?.interests).map((interest) => (
+                                <Badge key={interest} variant="secondary">
+                                  {interest}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">No interests added yet.</p>
+                          )}
+                        </div>
+                        <SummaryRow
+                          label="Project"
+                          valueText={detailUser.project?.title || "No project title yet"}
+                        />
+                        <SummaryRow
+                          label="Project status"
+                          valueText={detailUser.project?.status || "N/A"}
+                        />
+                        <SummaryRow
+                          label="Project keywords"
+                          valueText={detailUser.project?.keywords || "No keywords yet"}
+                        />
+                      </>
+                    )}
+
+                    {detailUser.role === "SUPERVISOR" && (
+                      <>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Supervisor Profile
+                        </p>
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-muted-foreground">Expertise</p>
+                          {splitCsv(detailUser.supervisorProfile?.expertise).length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {splitCsv(detailUser.supervisorProfile?.expertise).map((expertise) => (
+                                <Badge key={expertise} variant="outline">
+                                  {expertise}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">No expertise added yet.</p>
+                          )}
+                        </div>
+                        <SummaryRow
+                          label="Capacity"
+                          valueText={
+                            detailUser.supervisorProfile?.maxCapacity !== null &&
+                            detailUser.supervisorProfile?.maxCapacity !== undefined
+                              ? `${detailUser.assignedStudents?.length || 0}/${
+                                  detailUser.supervisorProfile.maxCapacity
+                                } assigned`
+                              : `${detailUser.assignedStudents?.length || 0} assigned`
+                          }
+                        />
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-muted-foreground">Assigned students</p>
+                          {detailUser.assignedStudents && detailUser.assignedStudents.length > 0 ? (
+                            <div className="space-y-1.5">
+                              {detailUser.assignedStudents.map((student) => (
+                                <div key={student.id} className="rounded border p-2 text-xs">
+                                  <p className="font-medium">
+                                    {student.fullName || student.user.email}
+                                  </p>
+                                  <p className="text-muted-foreground">
+                                    {student.user.project?.title || "No project title yet"}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">No assigned students yet.</p>
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    <Separator />
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Activity Stats
+                    </p>
                     <SummaryRow
-                      label="Project"
+                      label="Requests (sent/received)"
+                      valueText={`${detailUser._count?.sentRequests || 0}/${
+                        detailUser._count?.receivedRequests || 0
+                      }`}
+                    />
+                    <SummaryRow
+                      label="Requests pending (sent/received)"
                       valueText={
-                        detailUser.project?.title ||
-                        (detailUser.role === "STUDENT" ? "No project title yet" : "N/A")
+                        detailMetrics
+                          ? `${detailMetrics.pendingSentRequests}/${detailMetrics.pendingReceivedRequests}`
+                          : "0/0"
                       }
                     />
                     <SummaryRow
-                      label="Project status"
-                      valueText={detailUser.project?.status || "N/A"}
+                      label="Requests accepted (sent/received)"
+                      valueText={
+                        detailMetrics
+                          ? `${detailMetrics.acceptedSentRequests}/${detailMetrics.acceptedReceivedRequests}`
+                          : "0/0"
+                      }
+                    />
+                    <SummaryRow
+                      label="Requests declined (sent/received)"
+                      valueText={
+                        detailMetrics
+                          ? `${detailMetrics.declinedSentRequests}/${detailMetrics.declinedReceivedRequests}`
+                          : "0/0"
+                      }
                     />
                     <SummaryRow
                       label="Milestones"
@@ -1079,32 +1240,21 @@ export default function AdminUsersPage() {
                           : "N/A"
                       }
                     />
-                    <Separator />
                     <SummaryRow
                       label="Unread notifications"
                       value={detailMetrics?.unreadNotifications || 0}
                     />
                     <SummaryRow
-                      label="Messages sent"
-                      value={detailUser._count?.sentMessages || 0}
-                    />
-                    <SummaryRow
-                      label="Messages received"
-                      value={detailUser._count?.receivedMessages || 0}
+                      label="Messages (sent/received)"
+                      valueText={`${detailUser._count?.sentMessages || 0}/${
+                        detailUser._count?.receivedMessages || 0
+                      }`}
                     />
                     <SummaryRow
                       label="Meetings (org/att)"
                       valueText={`${detailUser._count?.meetingsOrganized || 0}/${
                         detailUser._count?.meetingsAttending || 0
                       }`}
-                    />
-                    <SummaryRow
-                      label="Pending requests"
-                      valueText={
-                        detailMetrics
-                          ? `${detailMetrics.pendingSentRequests}/${detailMetrics.pendingReceivedRequests}`
-                          : "0/0"
-                      }
                     />
                   </>
                 )}
@@ -1228,7 +1378,7 @@ function UserRow({
                 {user.status === "active" && <CheckCircle2 className="mr-1 h-3 w-3" />}
                 {user.status === "pending" && <AlertTriangle className="mr-1 h-3 w-3" />}
                 {user.status === "suspended" && <XCircle className="mr-1 h-3 w-3" />}
-                {user.status}
+                {user.status.toUpperCase()}
               </Badge>
             </div>
             <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
@@ -1237,27 +1387,9 @@ function UserRow({
                 <span className="truncate">{user.email}</span>
               </span>
               <span className="flex items-center gap-1.5">
-                <UserRound className="h-3.5 w-3.5" />
-                {user.department}
-              </span>
-              <span className="flex items-center gap-1.5">
                 <CalendarDays className="h-3.5 w-3.5" />
                 Joined {user.createdAt}
               </span>
-              <span className="flex items-center gap-1.5">
-                <div className="h-1.5 w-1.5 rounded-full bg-success" />
-                {user.lastActive}
-              </span>
-            </div>
-            <div className="grid gap-2 text-xs md:grid-cols-2">
-              <div className="rounded-md border bg-muted/20 px-2.5 py-1.5">
-                <span className="text-muted-foreground">Primary: </span>
-                <span className="font-medium">{user.primary}</span>
-              </div>
-              <div className="rounded-md border bg-muted/20 px-2.5 py-1.5">
-                <span className="text-muted-foreground">Detail: </span>
-                <span className="font-medium">{user.secondary}</span>
-              </div>
             </div>
           </div>
         </div>

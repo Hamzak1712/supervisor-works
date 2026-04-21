@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
 import { signToken } from "@/lib/auth"
-import { Role } from "@prisma/client"
+import { AccountStatus, Role } from "@prisma/client"
 
 type RegisterBody = {
   email: string
@@ -70,11 +70,14 @@ export async function POST(req: Request) {
 
     const passwordHash = await bcrypt.hash(password, 12)
 
+    const isSupervisorRegistration = role === "SUPERVISOR"
+
     const createdUser = await prisma.user.create({
       data: {
         email,
         passwordHash,
         role: role === "STUDENT" ? Role.STUDENT : Role.SUPERVISOR,
+        status: isSupervisorRegistration ? AccountStatus.PENDING : AccountStatus.ACTIVE,
         studentProfile:
           role === "STUDENT"
             ? {
@@ -92,6 +95,7 @@ export async function POST(req: Request) {
                   fullName: body.fullName ?? null,
                   expertise: body.expertise ?? null,
                   maxCapacity: body.maxCapacity ?? 5,
+                  acceptingStudents: true,
                 },
               }
             : undefined,
@@ -103,6 +107,17 @@ export async function POST(req: Request) {
         sessionVersion: true,
       },
     })
+
+    if (isSupervisorRegistration) {
+      return NextResponse.json(
+        {
+          user: createdUser,
+          message:
+            "Supervisor application submitted. An administrator must approve your account before you can sign in.",
+        },
+        { status: 201 }
+      )
+    }
 
     const token = await signToken({
       sub: createdUser.id,

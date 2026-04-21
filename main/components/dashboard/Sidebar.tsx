@@ -16,6 +16,10 @@ import {
   Activity,
   Database,
   UserCog,
+  SlidersHorizontal,
+  ClipboardList,
+  Megaphone,
+  ShieldAlert,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react"
@@ -49,7 +53,12 @@ const supervisorNavItems = [
 const adminNavItems = [
   { href: "/dashboard/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/admin/users", label: "User Management", icon: UserCog },
+  { href: "/dashboard/admin/projects", label: "Projects", icon: FileText },
+  { href: "/dashboard/admin/requests", label: "Requests", icon: ClipboardList },
   { href: "/dashboard/admin/supervisors", label: "Supervisors", icon: Users },
+  { href: "/dashboard/admin/communications", label: "Communications", icon: Megaphone },
+  { href: "/dashboard/admin/rbac", label: "Role Governance", icon: ShieldAlert },
+  { href: "/dashboard/admin/matching", label: "Matching", icon: SlidersHorizontal },
   { href: "/dashboard/admin/system-health", label: "System Health", icon: Activity },
   { href: "/dashboard/admin/data-management", label: "Data Management", icon: Database },
   { href: "/dashboard/admin/settings", label: "Settings", icon: Shield },

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { randomBytes } from "crypto"
-import { AccountStatus, Role } from "@prisma/client"
+import { AccountStatus, Prisma, Role } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { verifyTokenFromHeader, requireRole } from "@/lib/auth"
 
@@ -10,7 +10,7 @@ function isValidEmail(email: string) {
 }
 
 async function requireAdmin(req: Request) {
-  const payload = await verifyTokenFromHeader(req.headers.get("authorization"))
+  const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
 
   if (!payload) {
     return { ok: false as const, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
@@ -24,13 +24,41 @@ async function requireAdmin(req: Request) {
 }
 
 async function getUserDetails(userId: string) {
-  const [user, unreadNotifications, pendingSentRequests, pendingReceivedRequests] =
+  const [
+    user,
+    unreadNotifications,
+    pendingSentRequests,
+    pendingReceivedRequests,
+    acceptedSentRequests,
+    declinedSentRequests,
+    acceptedReceivedRequests,
+    declinedReceivedRequests,
+  ] =
     await prisma.$transaction([
       prisma.user.findUnique({
         where: { id: userId },
         include: {
           studentProfile: true,
           supervisorProfile: true,
+          assignedStudents: {
+            select: {
+              id: true,
+              fullName: true,
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  project: {
+                    select: {
+                      id: true,
+                      title: true,
+                      status: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
           project: {
             include: {
               milestones: {
@@ -70,6 +98,30 @@ async function getUserDetails(userId: string) {
           status: "pending",
         },
       }),
+      prisma.supervisionRequest.count({
+        where: {
+          studentId: userId,
+          status: "accepted",
+        },
+      }),
+      prisma.supervisionRequest.count({
+        where: {
+          studentId: userId,
+          status: "declined",
+        },
+      }),
+      prisma.supervisionRequest.count({
+        where: {
+          supervisorId: userId,
+          status: "accepted",
+        },
+      }),
+      prisma.supervisionRequest.count({
+        where: {
+          supervisorId: userId,
+          status: "declined",
+        },
+      }),
     ])
 
   if (!user) return null
@@ -80,6 +132,10 @@ async function getUserDetails(userId: string) {
       unreadNotifications,
       pendingSentRequests,
       pendingReceivedRequests,
+      acceptedSentRequests,
+      declinedSentRequests,
+      acceptedReceivedRequests,
+      declinedReceivedRequests,
       completedMilestones:
         user.project?.milestones.filter((m) => m.status === "completed").length || 0,
       totalMilestones: user.project?.milestones.length || 0,
@@ -97,6 +153,9 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url)
     const userId = searchParams.get("id")?.trim()
+    const search = searchParams.get("search")?.trim()
+    const roleParam = searchParams.get("role")?.trim().toUpperCase()
+    const statusParam = searchParams.get("status")?.trim().toUpperCase()
 
     if (userId) {
       const details = await getUserDetails(userId)
@@ -108,7 +167,49 @@ export async function GET(req: Request) {
       return NextResponse.json(details, { status: 200 })
     }
 
+    const where: Prisma.UserWhereInput = {}
+
+    if (roleParam && ["STUDENT", "SUPERVISOR", "ADMIN"].includes(roleParam)) {
+      where.role = roleParam as Role
+    }
+
+    if (statusParam && ["ACTIVE", "SUSPENDED", "PENDING"].includes(statusParam)) {
+      where.status = statusParam as AccountStatus
+    }
+
+    if (search) {
+      where.OR = [
+        {
+          email: {
+            contains: search,
+            mode: "insensitive",
+          },
+        },
+        {
+          studentProfile: {
+            is: {
+              fullName: {
+                contains: search,
+                mode: "insensitive",
+              },
+            },
+          },
+        },
+        {
+          supervisorProfile: {
+            is: {
+              fullName: {
+                contains: search,
+                mode: "insensitive",
+              },
+            },
+          },
+        },
+      ]
+    }
+
     const users = await prisma.user.findMany({
+      where,
       orderBy: { createdAt: "desc" },
       include: {
         studentProfile: true,
@@ -170,7 +271,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const temporaryPassword = randomBytes(32).toString("hex")
+    const temporaryPassword = randomBytes(9).toString("base64url")
     const passwordHash = await bcrypt.hash(temporaryPassword, 12)
 
     const user = await prisma.user.create({
@@ -198,7 +299,7 @@ export async function POST(req: Request) {
       },
     })
 
-    return NextResponse.json({ user }, { status: 201 })
+    return NextResponse.json({ user, temporaryPassword }, { status: 201 })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: "Invite failed" }, { status: 500 })
@@ -220,13 +321,25 @@ export async function PUT(req: Request) {
     }
 
     const userId = typeof body.userId === "string" ? body.userId.trim() : ""
+    const userIds: string[] = Array.isArray(body.userIds)
+      ? body.userIds.filter(
+          (id: unknown): id is string =>
+            typeof id === "string" && id.trim().length > 0
+        )
+      : []
+    const targetUserIds: string[] = Array.from(
+      new Set([...userIds.map((id: string) => id.trim()), ...(userId ? [userId] : [])])
+    )
     const roleRaw = typeof body.role === "string" ? body.role.trim() : ""
     const statusRaw =
       typeof body.status === "string" ? body.status.trim() : ""
     const action = typeof body.action === "string" ? body.action.trim() : ""
 
-    if (!userId && action !== "send_email") {
-      return NextResponse.json({ error: "userId is required" }, { status: 400 })
+    if (targetUserIds.length === 0 && action !== "send_email") {
+      return NextResponse.json(
+        { error: "userId or userIds is required" },
+        { status: 400 }
+      )
     }
 
     if (action === "reset_password") {
@@ -313,17 +426,13 @@ export async function PUT(req: Request) {
           ? body.subject.trim()
           : "Message from administrator"
       const message =
-        typeof body.message === "string" && body.message.trim()
-          ? body.message.trim()
-          : "An administrator sent you a message."
+        typeof body.message === "string" ? body.message.trim() : ""
 
-      const ids: string[] = Array.isArray(body.userIds)
-        ? body.userIds.filter((id: unknown): id is string => typeof id === "string" && id.trim().length > 0)
-        : userId
-        ? [userId]
-        : []
+      if (!message) {
+        return NextResponse.json({ error: "message is required" }, { status: 400 })
+      }
 
-      const uniqueIds: string[] = Array.from(new Set(ids.map((id: string) => id.trim())))
+      const uniqueIds: string[] = targetUserIds
 
       if (uniqueIds.length === 0) {
         return NextResponse.json({ error: "At least one target user is required" }, { status: 400 })
@@ -354,29 +463,104 @@ export async function PUT(req: Request) {
       )
     }
 
-    if (userId === auth.payload.sub && statusRaw === "SUSPENDED") {
+    if (
+      statusRaw === "SUSPENDED" &&
+      targetUserIds.includes(auth.payload.sub)
+    ) {
       return NextResponse.json(
         { error: "You cannot suspend your own account" },
         { status: 400 }
       )
     }
 
-    const data: {
-      role?: Role
-      status?: AccountStatus
-      sessionVersion?: { increment: number }
-    } = {}
+    if (roleRaw && targetUserIds.length !== 1) {
+      return NextResponse.json(
+        { error: "Bulk role changes are not supported. Provide a single userId." },
+        { status: 400 }
+      )
+    }
+
+    if (statusRaw && targetUserIds.length > 1 && roleRaw) {
+      return NextResponse.json(
+        { error: "Bulk updates support status only." },
+        { status: 400 }
+      )
+    }
+
+    if (statusRaw && targetUserIds.length > 1) {
+      if (!["ACTIVE", "SUSPENDED"].includes(statusRaw)) {
+        return NextResponse.json(
+          { error: "Invalid status. Use ACTIVE or SUSPENDED." },
+          { status: 400 }
+        )
+      }
+
+      const statusValue = statusRaw as AccountStatus
+
+      await prisma.user.updateMany({
+        where: { id: { in: targetUserIds } },
+        data: { status: statusValue },
+      })
+
+      if (statusRaw === "SUSPENDED") {
+        await prisma.user.updateMany({
+          where: { id: { in: targetUserIds } },
+          data: {
+            sessionVersion: {
+              increment: 1,
+            },
+          },
+        })
+      }
+
+      const updatedUsers = await prisma.user.findMany({
+        where: { id: { in: targetUserIds } },
+        include: {
+          studentProfile: true,
+          supervisorProfile: true,
+        },
+      })
+
+      return NextResponse.json(
+        { users: updatedUsers, updatedCount: updatedUsers.length },
+        { status: 200 }
+      )
+    }
+
+    const data: Prisma.UserUpdateInput = {}
 
     if (roleRaw) {
       if (!["STUDENT", "SUPERVISOR", "ADMIN"].includes(roleRaw)) {
         return NextResponse.json({ error: "Invalid role" }, { status: 400 })
       }
       data.role = roleRaw as Role
+
+      // Keep role-change flows safe by ensuring profile rows exist for role-specific dashboards.
+      if (roleRaw === "STUDENT") {
+        data.studentProfile = {
+          upsert: {
+            update: {},
+            create: {},
+          },
+        }
+      }
+
+      if (roleRaw === "SUPERVISOR") {
+        data.supervisorProfile = {
+          upsert: {
+            update: {},
+            create: {},
+          },
+        }
+      }
     }
 
     if (statusRaw) {
-      if (!["ACTIVE", "SUSPENDED", "PENDING"].includes(statusRaw)) {
-        return NextResponse.json({ error: "Invalid status" }, { status: 400 })
+      if (!["ACTIVE", "SUSPENDED"].includes(statusRaw)) {
+        return NextResponse.json(
+          { error: "Invalid status. Use ACTIVE or SUSPENDED." },
+          { status: 400 }
+        )
       }
       data.status = statusRaw as AccountStatus
 
@@ -386,7 +570,7 @@ export async function PUT(req: Request) {
     }
 
     const updated = await prisma.user.update({
-      where: { id: userId },
+      where: { id: targetUserIds[0] },
       data,
       include: {
         studentProfile: true,
@@ -410,10 +594,14 @@ export async function DELETE(req: Request) {
     }
 
     const { searchParams } = new URL(req.url)
-    const userId = searchParams.get("id")?.trim()
+    const userId =
+      searchParams.get("userId")?.trim() || searchParams.get("id")?.trim()
 
     if (!userId) {
-      return NextResponse.json({ error: "User ID required" }, { status: 400 })
+      return NextResponse.json(
+        { error: "userId query parameter is required" },
+        { status: 400 }
+      )
     }
 
     if (userId === auth.payload.sub) {

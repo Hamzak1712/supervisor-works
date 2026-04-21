@@ -35,6 +35,7 @@ export function RegisterForm() {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
+  const [notice, setNotice] = useState("")
   const [mounted, setMounted] = useState(false)
 
   React.useEffect(() => {
@@ -44,11 +45,13 @@ export function RegisterForm() {
   const handleChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
     setError("")
+    setNotice("")
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setNotice("")
 
     // Validation
     if (formData.password !== formData.confirmPassword) {
@@ -85,6 +88,18 @@ export function RegisterForm() {
       if (!res.ok) {
         setError(data.error || "Registration failed")
         setIsLoading(false)
+        return
+      }
+
+      if (!data?.token) {
+        setNotice(
+          data?.message ||
+            "Registration submitted. Please wait for admin approval."
+        )
+        setIsLoading(false)
+        window.setTimeout(() => {
+          router.push("/login")
+        }, 1800)
         return
       }
 
@@ -214,6 +229,10 @@ export function RegisterForm() {
 
           {error && (
             <p className="text-sm text-destructive">{error}</p>
+          )}
+
+          {notice && (
+            <p className="text-sm text-emerald-600">{notice}</p>
           )}
 
           <Button type="submit" className="w-full" disabled={isLoading}>

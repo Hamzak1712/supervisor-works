@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { verifyTokenFromHeader, requireRole } from "@/lib/auth"
 import { generateInitialMilestonePlan } from "@/lib/milestone-plan"
+import { autoArchiveCompletedAcademicPeriods } from "@/lib/academic-periods"
 
 const MIN_DEPENDENCY_GAP_DAYS = 3
 const MIN_BEFORE_CRITICAL_DAYS = 5
@@ -27,7 +28,7 @@ function normalizeTitle(value: string) {
 
 export async function GET(req: Request) {
   try {
-    const payload = await verifyTokenFromHeader(req.headers.get("authorization"))
+    const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
 
     if (!payload) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -135,7 +136,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const payload = await verifyTokenFromHeader(req.headers.get("authorization"))
+    const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
 
     if (!payload) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -173,13 +174,45 @@ export async function POST(req: Request) {
       )
     }
 
+    await autoArchiveCompletedAcademicPeriods(prisma)
+
     const project = await prisma.project.findUnique({
       where: { studentId: payload.sub },
-      select: { id: true },
+      select: {
+        id: true,
+        timelineLocked: true,
+        timelineLockReason: true,
+        academicPeriod: {
+          select: {
+            isArchived: true,
+          },
+        },
+      },
     })
 
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 })
+    }
+
+    if (project.academicPeriod?.isArchived) {
+      return NextResponse.json(
+        {
+          error:
+            "This project belongs to an archived academic period and is read-only.",
+        },
+        { status: 403 }
+      )
+    }
+
+    if (project.timelineLocked) {
+      return NextResponse.json(
+        {
+          error:
+            project.timelineLockReason ||
+            "Timeline is locked for this project and cannot be edited.",
+        },
+        { status: 403 }
+      )
     }
 
     const milestone = await prisma.milestone.create({
@@ -218,7 +251,7 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    const payload = await verifyTokenFromHeader(req.headers.get("authorization"))
+    const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
 
     if (!payload) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -237,6 +270,8 @@ export async function PUT(req: Request) {
     const action = typeof body.action === "string" ? body.action.trim() : ""
 
     if (action === "regenerate_initial_plan") {
+      await autoArchiveCompletedAcademicPeriods(prisma)
+
       const project = await prisma.project.findUnique({
         where: { studentId: payload.sub },
         select: {
@@ -245,6 +280,13 @@ export async function PUT(req: Request) {
           description: true,
           keywords: true,
           createdAt: true,
+          timelineLocked: true,
+          timelineLockReason: true,
+          academicPeriod: {
+            select: {
+              isArchived: true,
+            },
+          },
           milestones: {
             orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
             select: {
@@ -259,6 +301,27 @@ export async function PUT(req: Request) {
 
       if (!project) {
         return NextResponse.json({ error: "Project not found" }, { status: 404 })
+      }
+
+      if (project.academicPeriod?.isArchived) {
+        return NextResponse.json(
+          {
+            error:
+              "This project belongs to an archived academic period and is read-only.",
+          },
+          { status: 403 }
+        )
+      }
+
+      if (project.timelineLocked) {
+        return NextResponse.json(
+          {
+            error:
+              project.timelineLockReason ||
+              "Timeline is locked for this project and cannot be edited.",
+          },
+          { status: 403 }
+        )
       }
 
       const lockedMilestones = project.milestones.filter(
@@ -374,6 +437,8 @@ export async function PUT(req: Request) {
       )
     }
 
+    await autoArchiveCompletedAcademicPeriods(prisma)
+
     const milestone = await prisma.milestone.findUnique({
       where: { id: milestoneId },
       select: {
@@ -386,6 +451,17 @@ export async function PUT(req: Request) {
         project: {
           select: {
             studentId: true,
+            timelineLocked: true,
+            timelineLockReason: true,
+            academicPeriod: {
+              select: {
+                id: true,
+                name: true,
+                isArchived: true,
+                projectEndPolicyAt: true,
+                finalSubmissionAt: true,
+              },
+            },
           },
         },
       },
@@ -400,6 +476,43 @@ export async function PUT(req: Request) {
 
     if (milestone.project.studentId !== payload.sub) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+
+    if (milestone.project.timelineLocked) {
+      return NextResponse.json(
+        {
+          error:
+            milestone.project.timelineLockReason ||
+            "Timeline is locked for this project and cannot be edited.",
+        },
+        { status: 403 }
+      )
+    }
+
+    const period = milestone.project.academicPeriod
+
+    if (period?.isArchived) {
+      return NextResponse.json(
+        {
+          error:
+            "This project belongs to an archived academic period and is read-only.",
+        },
+        { status: 403 }
+      )
+    }
+
+    if (
+      period?.finalSubmissionAt &&
+      new Date() > period.finalSubmissionAt &&
+      status !== milestone.status
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "The final submission date has passed for this academic period. Timeline updates are locked.",
+        },
+        { status: 400 }
+      )
     }
 
     if (status === "delayed" && milestone.status === "completed") {
@@ -437,6 +550,8 @@ export async function PUT(req: Request) {
     if (status === "delayed") {
       const shiftDaysRequested =
         Number.isFinite(delayDaysRaw) && delayDaysRaw > 0 ? delayDaysRaw : 7
+      const hardEndDate =
+        period?.projectEndPolicyAt || period?.finalSubmissionAt || null
 
       if (milestone.isCriticalPath && shiftDaysRequested > MAX_CRITICAL_DELAY_DAYS) {
         return NextResponse.json(
@@ -503,6 +618,16 @@ export async function PUT(req: Request) {
       }
 
       const targetDueDate = addDays(new Date(milestone.dueDate), shiftDaysApplied)
+
+      if (hardEndDate && targetDueDate > hardEndDate) {
+        return NextResponse.json(
+          {
+            error: `Reschedule refused: "${milestone.title}" would move beyond the period end-date policy (${hardEndDate.toLocaleDateString()}).`,
+          },
+          { status: 400 }
+        )
+      }
+
       const downstreamMilestones = schedulingMilestones.slice(currentIndex + 1)
       const downstreamUpdates: Array<{ id: string; dueDate: Date }> = []
 
@@ -537,6 +662,15 @@ export async function PUT(req: Request) {
         )
         const recalculatedDate =
           shiftedDate > dependencyFloor ? shiftedDate : dependencyFloor
+
+        if (hardEndDate && recalculatedDate > hardEndDate) {
+          return NextResponse.json(
+            {
+              error: `Reschedule refused: downstream milestone "${item.title}" would move beyond the period end-date policy (${hardEndDate.toLocaleDateString()}).`,
+            },
+            { status: 400 }
+          )
+        }
 
         if (recalculatedDate.getTime() !== new Date(item.dueDate).getTime()) {
           downstreamUpdates.push({
@@ -578,6 +712,18 @@ export async function PUT(req: Request) {
             },
           })
         ),
+        prisma.timelineRescheduleEvent.create({
+          data: {
+            projectId: milestone.projectId,
+            triggerType: "student_delay",
+            triggeredByUserId: payload.sub,
+            anchorMilestoneId: milestoneId,
+            shiftDaysRequested,
+            shiftDaysApplied,
+            rescheduledCount: downstreamUpdates.length,
+            warnings,
+          },
+        }),
       ])
 
       updatedMilestone = txResults[0] as typeof updatedMilestone

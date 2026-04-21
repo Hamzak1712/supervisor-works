@@ -4,7 +4,7 @@ import { verifyTokenFromHeader } from "@/lib/auth"
 
 export async function GET(req: Request) {
   try {
-    const tokenData = await verifyTokenFromHeader(req.headers.get("authorization"))
+    const tokenData = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
 
     if (!tokenData) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
@@ -32,7 +32,21 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    return NextResponse.json({ user }, { status: 200 })
+    return NextResponse.json(
+      {
+        user,
+        impersonation: tokenData.isImpersonating
+          ? {
+              isImpersonating: true,
+              actorSub: tokenData.actorSub || null,
+              actorEmail: tokenData.actorEmail || null,
+              actorRole: tokenData.actorRole || null,
+              sessionId: tokenData.impersonationSessionId || null,
+            }
+          : null,
+      },
+      { status: 200 }
+    )
   } catch (err) {
     console.error(err)
     return NextResponse.json(

@@ -66,6 +66,8 @@ export function LoginForm() {
       localStorage.setItem("userRole", data.user.role.toLowerCase())
       localStorage.setItem("userEmail", data.user.email)
       localStorage.setItem("userId", data.user.id)
+      localStorage.removeItem("impersonationActive")
+      localStorage.removeItem("impersonationAdminToken")
 
       const role = data.user.role.toLowerCase() as UserRole
       setIsLoading(false)
@@ -80,6 +82,8 @@ export function LoginForm() {
     // Demo mode: skip API, go straight to mock dashboard
     localStorage.setItem("userRole", role)
     localStorage.setItem("userEmail", demoCredentials[role].email)
+    localStorage.removeItem("impersonationActive")
+    localStorage.removeItem("impersonationAdminToken")
     router.push(`/dashboard/${role}`)
   }
 

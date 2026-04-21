@@ -521,9 +521,17 @@ export default function AdminDashboardPage() {
                     Export platform data
                   </Link>
                 </Button>
-                <Button variant="outline" className="w-full justify-start bg-transparent">
-                  <Megaphone className="mr-2 h-4 w-4" />
-                  Broadcast announcement
+                <Button variant="outline" className="w-full justify-start bg-transparent" asChild>
+                  <Link href="/dashboard/admin/communications">
+                    <Megaphone className="mr-2 h-4 w-4" />
+                    Broadcast announcement
+                  </Link>
+                </Button>
+                <Button variant="outline" className="w-full justify-start bg-transparent" asChild>
+                  <Link href="/dashboard/admin/rbac">
+                    <ShieldAlert className="mr-2 h-4 w-4" />
+                    Role governance
+                  </Link>
                 </Button>
                 <Button variant="outline" className="w-full justify-start bg-transparent">
                   <Sparkles className="mr-2 h-4 w-4" />
