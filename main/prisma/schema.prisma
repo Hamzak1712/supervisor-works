@@ -32,6 +32,23 @@ enum AnnouncementAudience {
   YEAR_GROUP
 }
 
+enum DataBackupFrequency {
+  HOURLY
+  DAILY
+  WEEKLY
+}
+
+enum DataBackupType {
+  MANUAL
+  AUTOMATED
+}
+
+enum DataBackupStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
 model User {
   id                String   @id @default(cuid())
   email             String   @unique
@@ -62,6 +79,8 @@ model User {
   customRoleAssignments UserCustomRole[] @relation("UserCustomRoles")
   customRolesAssigned   UserCustomRole[] @relation("AssignedCustomRoles")
   rolesCreated          CustomRole[]     @relation("RoleCreatedBy")
+  incidentsCreated      ServiceIncident[] @relation("IncidentCreatedBy")
+  maintenanceCreated    MaintenanceWindow[] @relation("MaintenanceCreatedBy")
   adminImpersonationSessions  ImpersonationSession[] @relation("ImpersonationAdmin")
   targetImpersonationSessions ImpersonationSession[] @relation("ImpersonationTarget")
   actorAuditLogs        AuditLog[]       @relation("ActorAuditLogs")
@@ -70,6 +89,7 @@ model User {
   matchingBlacklistAsSupervisor MatchingBlacklist[] @relation("BlacklistSupervisor")
   matchRecommendationsAsStudent MatchRecommendation[] @relation("StudentRecommendations")
   matchRecommendationsAsSupervisor MatchRecommendation[] @relation("SupervisorRecommendations")
+  serviceApiKeysCreated ServiceApiKey[]
 }
 
 model StudentProfile {
@@ -80,6 +100,12 @@ model StudentProfile {
   fullName     String?
   skills       String?
   interests    String?
+  onboardingCompleted Boolean @default(true)
+  onboardingProjectIdea String?
+  onboardingStrengths String?
+  onboardingWeaknesses String?
+  onboardingConversation Json?
+  onboardingSignals Json?
 
   supervisorId String?
   supervisor   User?   @relation("AssignedSupervisor", fields: [supervisorId], references: [id])
@@ -92,6 +118,9 @@ model SupervisorProfile {
 
   fullName    String?
   expertise   String?
+  onboardingCompleted Boolean @default(false)
+  onboardingConversation Json?
+  onboardingSignals Json?
   maxCapacity Int    @default(5)
   acceptingStudents Boolean @default(true)
 }
@@ -386,4 +415,173 @@ model AuditLog {
   actor                 User?    @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
   targetUser            User?    @relation("TargetAuditLogs", fields: [targetUserId], references: [id], onDelete: SetNull)
   impersonationSession  ImpersonationSession? @relation(fields: [impersonationSessionId], references: [id], onDelete: SetNull)
+}
+
+model ServiceHealthSnapshot {
+  id                String   @id @default(cuid())
+  serviceKey        String
+  serviceName       String
+  status            String
+  responseMs        Int
+  requestPerMin     Int?
+  errorRatePercent  Float?
+  queueDepth        Int?
+  cpuPercent        Float?
+  memoryPercent     Float?
+  storagePercent    Float?
+  dbConnections     Int?
+  createdAt         DateTime @default(now())
+}
+
+model ServiceIncident {
+  id               String   @id @default(cuid())
+  serviceKey       String
+  title            String
+  severity         String
+  status           String   @default("open")
+  ownerEmail       String?
+  description      String?
+  resolutionNotes  String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  resolvedAt       DateTime?
+
+  createdBy        User?    @relation("IncidentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+}
+
+model MaintenanceWindow {
+  id          String   @id @default(cuid())
+  title       String
+  message     String
+  impact      String?
+  startsAt    DateTime
+  endsAt      DateTime
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User?    @relation("MaintenanceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+}
+
+model SystemHealthConfig {
+  id                       String   @id @default("global")
+  errorRateSpikeThreshold  Float    @default(5.0)
+  queueDepthWarning        Int      @default(25)
+  queueDepthCritical       Int      @default(60)
+  maintenanceBannerLeadMin Int      @default(120)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model SystemHealthSignal {
+  id                String   @id @default("global")
+  apiRequestsLast5m Int      @default(1)
+  api5xxLast5m      Int      @default(0)
+  aiQueueDepth      Int      @default(0)
+  emailQueueDepth   Int      @default(0)
+  updatedAt         DateTime @updatedAt
+}
+
+model DataManagementConfig {
+  id                            String             @id @default("global")
+  autoBackupEnabled             Boolean            @default(true)
+  backupFrequency               DataBackupFrequency @default(DAILY)
+  backupRetentionDays           Int                @default(30)
+  piiMaskBackups                Boolean            @default(true)
+  completedProjectRetentionDays Int                @default(365)
+  messageRetentionDays          Int                @default(365)
+  auditLogRetentionDays         Int                @default(730)
+  createdAt                     DateTime           @default(now())
+  updatedAt                     DateTime           @updatedAt
+}
+
+model DataBackup {
+  id            String           @id @default(cuid())
+  type          DataBackupType   @default(MANUAL)
+  status        DataBackupStatus @default(COMPLETED)
+  format        String           @default("json")
+  piiMasked     Boolean          @default(true)
+  snapshot      Json?
+  recordCount   Int              @default(0)
+  sizeBytes     Int              @default(0)
+  downloadToken String           @unique
+  createdById   String?
+  createdByEmail String?
+  restoreReason String?
+  restoredAt    DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+}
+
+model DataImportJob {
+  id             String   @id @default(cuid())
+  entityType     String
+  status         String   @default("completed")
+  processedCount Int      @default(0)
+  createdCount   Int      @default(0)
+  updatedCount   Int      @default(0)
+  failedCount    Int      @default(0)
+  errors         Json?
+  initiatedById  String?
+  initiatedByEmail String?
+  createdAt      DateTime @default(now())
+}
+
+model PlatformSettings {
+  id                        String   @id @default("global")
+  institutionName           String   @default("SupervisorMatch")
+  institutionLogoUrl        String?
+  institutionFaviconUrl     String?
+  platformDescription       String?
+  supportEmail              String?
+  defaultLocale             String   @default("en")
+  defaultTimezone           String   @default("Europe/London")
+  themeMode                 String   @default("dark")
+  featureMessagingEnabled   Boolean  @default(true)
+  featureMeetingsEnabled    Boolean  @default(true)
+  featureAnnouncementsEnabled Boolean @default(true)
+  featureAiExplanationsEnabled Boolean @default(true)
+  smtpProvider              String   @default("sendgrid")
+  smtpHost                  String?
+  smtpPort                  Int?
+  smtpUser                  String?
+  smtpApiKeyMasked          String?
+  aiProvider                String   @default("openai")
+  aiModel                   String?
+  aiTemperature             Float    @default(0.2)
+  aiRateLimitPerMin         Int      @default(60)
+  aiApiKeyMasked            String?
+  ssoProvider               String?
+  ssoEnabled                Boolean  @default(false)
+  lmsProvider               String?
+  lmsEnabled                Boolean  @default(false)
+  calendarProvider          String?
+  calendarEnabled           Boolean  @default(false)
+  sessionTimeoutMinutes     Int      @default(60)
+  passwordMinLength         Int      @default(12)
+  twoFactorRequiredForAdmin Boolean  @default(true)
+  ipAllowList               String?
+  auditLoggingEnabled       Boolean  @default(true)
+  loginAttemptLimit         Int      @default(5)
+  lockoutMinutes            Int      @default(15)
+  updatedById               String?
+  updatedByEmail            String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+}
+
+model ServiceApiKey {
+  id             String   @id @default(cuid())
+  name           String
+  service        String
+  keyPrefix      String
+  keyHash        String
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdById    String?
+  createdByEmail String?
+  createdAt      DateTime @default(now())
+
+  createdBy      User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
 }

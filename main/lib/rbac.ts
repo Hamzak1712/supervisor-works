@@ -67,6 +67,36 @@ const PERMISSIONS: PermissionSeed[] = [
     description: "Manage announcements, templates and broadcasts.",
   },
   {
+    key: "admin.system_health.read",
+    name: "View System Health",
+    category: "Operations",
+    description: "View service status, incidents, maintenance and operations metrics.",
+  },
+  {
+    key: "admin.reports.read",
+    name: "View Analytics Reports",
+    category: "Analytics",
+    description: "View matching, workload, project health, and engagement analytics reports.",
+  },
+  {
+    key: "admin.system_health.manage",
+    name: "Manage System Health",
+    category: "Operations",
+    description: "Create incidents, configure thresholds, and schedule maintenance windows.",
+  },
+  {
+    key: "admin.data_management.manage",
+    name: "Manage Data",
+    category: "Operations",
+    description: "Manage backups, imports/exports, retention policies, and danger-zone actions.",
+  },
+  {
+    key: "admin.settings.manage",
+    name: "Manage Platform Settings",
+    category: "Configuration",
+    description: "Manage integrations, branding, security policies, and feature flags.",
+  },
+  {
     key: "admin.rbac.manage",
     name: "Manage Roles & Permissions",
     category: "Security",

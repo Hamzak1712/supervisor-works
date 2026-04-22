@@ -71,6 +71,18 @@ export function LoginForm() {
 
       const role = data.user.role.toLowerCase() as UserRole
       setIsLoading(false)
+      if (data?.needsOnboarding) {
+        if (role === "student") {
+          router.push("/onboarding/student")
+          return
+        }
+
+        if (role === "supervisor") {
+          router.push("/onboarding/supervisor")
+          return
+        }
+      }
+
       router.push(`/dashboard/${role}`)
     } catch {
       setError("Network error. Please try again.")

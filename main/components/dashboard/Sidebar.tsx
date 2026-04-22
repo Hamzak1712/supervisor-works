@@ -20,6 +20,7 @@ import {
   ClipboardList,
   Megaphone,
   ShieldAlert,
+  BarChart3,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react"
@@ -59,6 +60,7 @@ const adminNavItems = [
   { href: "/dashboard/admin/communications", label: "Communications", icon: Megaphone },
   { href: "/dashboard/admin/rbac", label: "Role Governance", icon: ShieldAlert },
   { href: "/dashboard/admin/matching", label: "Matching", icon: SlidersHorizontal },
+  { href: "/dashboard/admin/reports", label: "Reports", icon: BarChart3 },
   { href: "/dashboard/admin/system-health", label: "System Health", icon: Activity },
   { href: "/dashboard/admin/data-management", label: "Data Management", icon: Database },
   { href: "/dashboard/admin/settings", label: "Settings", icon: Shield },

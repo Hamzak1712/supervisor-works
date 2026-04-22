@@ -85,6 +85,7 @@ export async function POST(req: Request) {
                   fullName: body.fullName ?? null,
                   skills: body.skills ?? null,
                   interests: body.interests ?? null,
+                  onboardingCompleted: false,
                 },
               }
             : undefined,
@@ -126,7 +127,14 @@ export async function POST(req: Request) {
       sessionVersion: createdUser.sessionVersion,
     })
 
-    return NextResponse.json({ token, user: createdUser }, { status: 201 })
+    return NextResponse.json(
+      {
+        token,
+        user: createdUser,
+        needsOnboarding: createdUser.role === Role.STUDENT,
+      },
+      { status: 201 }
+    )
   } catch (err) {
     console.error(err)
     return NextResponse.json(

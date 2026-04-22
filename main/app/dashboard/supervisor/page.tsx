@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import {
   Users,
@@ -175,6 +176,7 @@ function calculateMatchScore(
 }
 
 export default function SupervisorDashboardPage() {
+  const router = useRouter()
   const [shellUser, setShellUser] = useState<User>(fallbackShellUser)
   const [students, setStudents] = useState<StudentOverview[]>([])
   const [requests, setRequests] = useState<RequestOverview[]>([])
@@ -213,6 +215,11 @@ export default function SupervisorDashboardPage() {
 
         if (!meRes.ok) {
           throw new Error(meData?.error || "Failed to load supervisor profile")
+        }
+
+        if (meData?.needsOnboarding) {
+          router.replace("/onboarding/supervisor")
+          return
         }
 
         if (!studentsRes.ok) {

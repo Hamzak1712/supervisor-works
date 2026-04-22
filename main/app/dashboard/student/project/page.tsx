@@ -158,7 +158,7 @@ export default function StudentProjectPage() {
   const [status, setStatus] = useState("draft")
 
   const fetchProjectAndProfile = useCallback(
-    async (options?: { silent?: boolean }) => {
+    async (options?: { silent?: boolean; syncEditorFields?: boolean }) => {
       try {
         if (!options?.silent) {
           setError("")
@@ -219,10 +219,17 @@ export default function StudentProjectPage() {
 
         const dbProject: ProjectApi = projectData.project
         setProject(dbProject)
-        setTitle(dbProject?.title || "")
-        setDescription(dbProject?.description || "")
-        setKeywords(dbProject?.keywords || "")
-        setStatus(dbProject?.status || "draft")
+        const shouldSyncEditorFields =
+          typeof options?.syncEditorFields === "boolean"
+            ? options.syncEditorFields
+            : !isEditing
+
+        if (shouldSyncEditorFields) {
+          setTitle(dbProject?.title || "")
+          setDescription(dbProject?.description || "")
+          setKeywords(dbProject?.keywords || "")
+          setStatus(dbProject?.status || "draft")
+        }
 
         setSupervisor(profileData.supervisor || null)
         setLatestRequest(profileData.latestRequest || null)
@@ -251,19 +258,25 @@ export default function StudentProjectPage() {
         setLoading(false)
       }
     },
-    []
+    [isEditing]
   )
 
   useEffect(() => {
     function refreshOnVisible() {
       if (document.visibilityState === "visible") {
-        void fetchProjectAndProfile({ silent: true })
+        void fetchProjectAndProfile({
+          silent: true,
+          syncEditorFields: !isEditing,
+        })
       }
     }
 
     void fetchProjectAndProfile()
     const interval = window.setInterval(() => {
-      void fetchProjectAndProfile({ silent: true })
+      void fetchProjectAndProfile({
+        silent: true,
+        syncEditorFields: !isEditing,
+      })
     }, 10000)
 
     window.addEventListener("focus", refreshOnVisible)
@@ -274,7 +287,7 @@ export default function StudentProjectPage() {
       window.removeEventListener("focus", refreshOnVisible)
       document.removeEventListener("visibilitychange", refreshOnVisible)
     }
-  }, [fetchProjectAndProfile])
+  }, [fetchProjectAndProfile, isEditing])
 
   const handleSave = async () => {
     try {

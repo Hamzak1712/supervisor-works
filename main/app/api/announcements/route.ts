@@ -40,50 +40,114 @@ export async function GET(req: Request) {
 
     const now = new Date()
 
-    const allActive = (await db.announcement.findMany({
-      where: {
-        startsAt: {
-          lte: now,
-        },
-        OR: [
-          { expiresAt: null },
-          {
-            expiresAt: {
-              gt: now,
+    const [allActive, config, maintenanceWindows] = (await Promise.all([
+      db.announcement.findMany({
+        where: {
+          startsAt: {
+            lte: now,
+          },
+          OR: [
+            { expiresAt: null },
+            {
+              expiresAt: {
+                gt: now,
+              },
             },
+          ],
+        },
+        orderBy: [
+          {
+            startsAt: "desc",
+          },
+          {
+            createdAt: "desc",
           },
         ],
-      },
-      orderBy: [
-        {
-          startsAt: "desc",
+        select: {
+          id: true,
+          title: true,
+          body: true,
+          severity: true,
+          audience: true,
+          audienceYearGroup: true,
+          startsAt: true,
+          expiresAt: true,
         },
-        {
-          createdAt: "desc",
+      }),
+      db.systemHealthConfig.findUnique({
+        where: { id: "global" },
+        select: {
+          maintenanceBannerLeadMin: true,
         },
-      ],
-      select: {
-        id: true,
-        title: true,
-        body: true,
-        severity: true,
-        audience: true,
-        audienceYearGroup: true,
-        startsAt: true,
-        expiresAt: true,
-      },
-    })) as Array<{
-      id: string
-      title: string
-      body: string
-      severity: "INFO" | "WARNING" | "CRITICAL"
-      audience: "ALL" | "STUDENTS" | "SUPERVISORS" | "YEAR_GROUP"
-      audienceYearGroup: string | null
-      startsAt: Date
-      expiresAt: Date | null
-    }>
+      }),
+      db.maintenanceWindow.findMany({
+        where: {
+          endsAt: {
+            gt: now,
+          },
+        },
+        orderBy: {
+          startsAt: "asc",
+        },
+        select: {
+          id: true,
+          title: true,
+          message: true,
+          impact: true,
+          startsAt: true,
+          endsAt: true,
+        },
+      }),
+    ])) as [
+      Array<{
+        id: string
+        title: string
+        body: string
+        severity: "INFO" | "WARNING" | "CRITICAL"
+        audience: "ALL" | "STUDENTS" | "SUPERVISORS" | "YEAR_GROUP"
+        audienceYearGroup: string | null
+        startsAt: Date
+        expiresAt: Date | null
+      }>,
+      { maintenanceBannerLeadMin: number } | null,
+      Array<{
+        id: string
+        title: string
+        message: string
+        impact: string | null
+        startsAt: Date
+        endsAt: Date
+      }>,
+    ]
 
-    const audienceFiltered = allActive.filter((announcement) => {
+    const leadMinutes = config?.maintenanceBannerLeadMin ?? 120
+    const maintenanceAnnouncements = maintenanceWindows
+      .filter((windowItem) => {
+        const startMs = windowItem.startsAt.getTime()
+        const endMs = windowItem.endsAt.getTime()
+        return (
+          (startMs <= now.getTime() && endMs > now.getTime()) ||
+          (startMs > now.getTime() &&
+            startMs <= now.getTime() + leadMinutes * 60 * 1000)
+        )
+      })
+      .map((windowItem) => ({
+        id: `maintenance-${windowItem.id}`,
+        title: `Scheduled maintenance: ${windowItem.title}`,
+        body:
+          windowItem.impact && windowItem.impact.trim()
+            ? `${windowItem.message} Impact: ${windowItem.impact}`
+            : windowItem.message,
+        severity: "WARNING" as const,
+        audience: "ALL" as const,
+        audienceYearGroup: null,
+        startsAt: windowItem.startsAt,
+        expiresAt: windowItem.endsAt,
+      }))
+
+    const combined = [...maintenanceAnnouncements, ...allActive]
+
+    const audienceFiltered = combined.filter((announcement) => {
       if (announcement.audience === "ALL") return true
       if (
         announcement.audience === "STUDENTS" &&

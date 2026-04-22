@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { verifyTokenFromHeader, requireRole } from "@/lib/auth"
 
+const db = prisma as any
+
 async function getLatestRequest(studentId: string) {
   const latestRequest = await prisma.supervisionRequest.findFirst({
     where: { studentId },
@@ -52,13 +54,19 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
-    const profile = await prisma.studentProfile.findUnique({
+    const profile = await db.studentProfile.findUnique({
       where: { userId: payload.sub },
       select: {
         fullName: true,
         skills: true,
         interests: true,
         supervisorId: true,
+        onboardingCompleted: true,
+        onboardingProjectIdea: true,
+        onboardingStrengths: true,
+        onboardingWeaknesses: true,
+        onboardingConversation: true,
+        onboardingSignals: true,
       },
     })
 
@@ -106,6 +114,12 @@ export async function GET(req: Request) {
           skills: profile?.skills ?? null,
           interests: profile?.interests ?? null,
           supervisorId: profile?.supervisorId ?? null,
+          onboardingCompleted: profile?.onboardingCompleted ?? false,
+          onboardingProjectIdea: profile?.onboardingProjectIdea ?? null,
+          onboardingStrengths: profile?.onboardingStrengths ?? null,
+          onboardingWeaknesses: profile?.onboardingWeaknesses ?? null,
+          onboardingConversation: profile?.onboardingConversation ?? null,
+          onboardingSignals: profile?.onboardingSignals ?? null,
         },
         supervisor,
         latestRequest,
@@ -149,24 +163,32 @@ export async function PUT(req: Request) {
     const interests =
       typeof body.interests === "string" ? body.interests.trim() : null
 
-    const profile = await prisma.studentProfile.upsert({
+    const profile = await db.studentProfile.upsert({
       where: { userId: payload.sub },
       create: {
         userId: payload.sub,
         fullName,
         skills,
         interests,
+        onboardingCompleted: true,
       },
       update: {
         fullName,
         skills,
         interests,
+        onboardingCompleted: true,
       },
       select: {
         fullName: true,
         skills: true,
         interests: true,
         supervisorId: true,
+        onboardingCompleted: true,
+        onboardingProjectIdea: true,
+        onboardingStrengths: true,
+        onboardingWeaknesses: true,
+        onboardingConversation: true,
+        onboardingSignals: true,
       },
     })
 

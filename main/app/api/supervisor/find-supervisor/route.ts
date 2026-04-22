@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { verifyTokenFromHeader, requireRole } from "@/lib/auth"
 
+const db = prisma as any
+
 export async function GET(req: Request) {
   try {
     const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
@@ -41,12 +43,13 @@ export async function GET(req: Request) {
       (pair) => pair.supervisorId
     )
 
-    const supervisors = await prisma.user.findMany({
+    const supervisors = await db.user.findMany({
       where: {
         role: "SUPERVISOR",
         status: "ACTIVE",
         supervisorProfile: {
           is: {
+            onboardingCompleted: true,
             acceptingStudents: true,
           },
         },
@@ -66,16 +69,17 @@ export async function GET(req: Request) {
             expertise: true,
             maxCapacity: true,
             acceptingStudents: true,
+            onboardingCompleted: true,
           },
         },
       },
     })
 
-    const data = supervisors.map((supervisor) => {
+    const data = supervisors.map((supervisor: any) => {
       const expertise =
         supervisor.supervisorProfile?.expertise
           ?.split(",")
-          .map((item) => item.trim())
+          .map((item: string) => item.trim())
           .filter(Boolean) || []
 
       return {

@@ -1,582 +1,870 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ComponentType } from "react"
 import { DashboardShell } from "@/components/dashboard/DashboardShell"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { currentAdmin, mockSystemHealth } from "@/lib/mock-data"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import type { User } from "@/types"
 import {
   Activity,
-  Server,
-  Database,
-  ShieldCheck,
   AlertTriangle,
-  Clock3,
-  CheckCircle2,
   Bell,
+  CheckCircle2,
+  Clock3,
   Cpu,
+  Database,
   HardDrive,
   RefreshCw,
-  Download,
-  LineChart,
+  Server,
   Wifi,
-  Zap,
-  Calendar,
-  Terminal,
-  ScrollText,
   XCircle,
-  Play,
 } from "lucide-react"
 
-type Status = "operational" | "degraded" | "down"
+type ServiceStatus = "operational" | "degraded" | "down"
 
-interface ExtendedService {
-  service: string
-  status: Status
-  lastChecked: string
-  uptime: number
-  responseMs: number
-  requestsPerMin: number
-  errorRate: number
+type SystemHealthPayload = {
+  generatedAt: string
+  services: Array<{
+    serviceKey: "db" | "api" | "ai" | "email" | "storage"
+    serviceName: string
+    status: ServiceStatus
+    responseMs: number
+    requestPerMin: number | null
+    errorRatePercent: number | null
+    queueDepth: number | null
+    details?: string
+  }>
+  resources: {
+    cpuPercent: number
+    memoryPercent: number
+    storagePercent: number | null
+    dbConnections: number | null
+  }
+  statusCounts: {
+    operational: number
+    degraded: number
+    down: number
+  }
+  config: {
+    errorRateSpikeThreshold: number
+    queueDepthWarning: number
+    queueDepthCritical: number
+    maintenanceBannerLeadMin: number
+  }
+  signal: {
+    apiRequestsLast5m: number
+    api5xxLast5m: number
+    aiQueueDepth: number
+    emailQueueDepth: number
+  }
+  alerts: {
+    errorSpike: boolean
+    queueSpike: boolean
+    errorRatePercent: number
+    queueDepth: number
+  }
+  incidents: Array<{
+    id: string
+    serviceKey: string
+    title: string
+    severity: string
+    status: string
+    ownerEmail: string | null
+    description: string | null
+    resolutionNotes: string | null
+    createdAt: string
+    updatedAt: string
+    resolvedAt: string | null
+    createdByEmail: string | null
+  }>
+  maintenanceWindows: Array<{
+    id: string
+    title: string
+    message: string
+    impact: string | null
+    startsAt: string
+    endsAt: string
+    createdAt: string
+    createdByEmail: string | null
+    activeNow: boolean
+    startsSoon: boolean
+  }>
+  trends: Record<
+    string,
+    {
+      h24: Array<{ timestamp: string; avgResponseMs: number; uptimePercent: number }>
+      d7: Array<{ timestamp: string; avgResponseMs: number; uptimePercent: number }>
+      d30: Array<{ timestamp: string; avgResponseMs: number; uptimePercent: number }>
+    }
+  >
 }
 
-interface IncidentEntry {
-  id: string
-  title: string
-  service: string
-  severity: "low" | "medium" | "high"
-  status: "resolved" | "investigating" | "monitoring"
-  startedAt: string
-  duration: string
-  description: string
+const fallbackShellUser: User = {
+  id: "admin",
+  email: "admin@example.com",
+  name: "Admin",
+  role: "admin",
+  createdAt: new Date(0).toISOString(),
 }
 
-function getServiceIcon(name: string) {
-  const n = name.toLowerCase()
-  if (n.includes("database")) return Database
-  if (n.includes("authentication")) return ShieldCheck
-  if (n.includes("storage")) return HardDrive
-  if (n.includes("engine") || n.includes("matching")) return Cpu
-  if (n.includes("notification")) return Bell
-  return Server
+function toneClass(status: ServiceStatus) {
+  if (status === "operational") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+  if (status === "degraded") return "border-amber-500/30 bg-amber-500/10 text-amber-700"
+  return "border-red-500/30 bg-red-500/10 text-red-700"
+}
+
+function serviceIcon(serviceKey: string): ComponentType<{ className?: string }> {
+  if (serviceKey === "db") return Database
+  if (serviceKey === "storage") return HardDrive
+  if (serviceKey === "api") return Wifi
+  if (serviceKey === "ai") return Cpu
+  return Bell
 }
 
 export default function AdminSystemHealthPage() {
-  const [autoRefresh, setAutoRefresh] = useState(true)
-  const [alertsEnabled, setAlertsEnabled] = useState(true)
-  const [lastRefreshed, setLastRefreshed] = useState(new Date())
+  const [shellUser, setShellUser] = useState<User>(fallbackShellUser)
+  const [payload, setPayload] = useState<SystemHealthPayload | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const [notice, setNotice] = useState("")
 
-  const services: ExtendedService[] = useMemo(
-    () =>
-      mockSystemHealth.map((s, i) => ({
-        ...s,
-        responseMs: [42, 18, 156, 287, 31][i] ?? 50,
-        requestsPerMin: [1240, 3450, 890, 430, 2100][i] ?? 500,
-        errorRate: s.status === "operational" ? 0.02 : s.status === "degraded" ? 1.4 : 100,
-      })),
-    [],
-  )
+  const [trendRange, setTrendRange] = useState<"24h" | "7d" | "30d">("24h")
+  const [trendServiceKey, setTrendServiceKey] = useState("db")
 
-  const incidents: IncidentEntry[] = [
-    {
-      id: "inc-001",
-      title: "Notification service latency spike",
-      service: "Notification Service",
-      severity: "medium",
-      status: "investigating",
-      startedAt: "2024-12-20 08:12",
-      duration: "Ongoing",
-      description: "Email queue processing slower than normal. Team investigating SMTP provider.",
-    },
-    {
-      id: "inc-002",
-      title: "Database failover completed",
-      service: "Database (PostgreSQL)",
-      severity: "low",
-      status: "resolved",
-      startedAt: "2024-12-18 02:34",
-      duration: "14 min",
-      description: "Automatic failover to replica during scheduled patching. No data loss.",
-    },
-    {
-      id: "inc-003",
-      title: "AI matching engine queue backlog",
-      service: "AI Matching Engine",
-      severity: "high",
-      status: "resolved",
-      startedAt: "2024-12-15 17:01",
-      duration: "1h 42m",
-      description: "Burst of matching requests caused queue backlog. Scaled horizontally.",
-    },
-    {
-      id: "inc-004",
-      title: "Storage bucket region switch",
-      service: "File Storage",
-      severity: "low",
-      status: "resolved",
-      startedAt: "2024-12-10 11:20",
-      duration: "8 min",
-      description: "Planned maintenance to migrate assets to primary region.",
-    },
-  ]
+  const [incidentServiceKey, setIncidentServiceKey] = useState("api")
+  const [incidentTitle, setIncidentTitle] = useState("")
+  const [incidentSeverity, setIncidentSeverity] = useState("medium")
+  const [incidentOwnerEmail, setIncidentOwnerEmail] = useState("")
+  const [incidentDescription, setIncidentDescription] = useState("")
 
-  const maintenance = [
-    {
-      title: "Quarterly database vacuum",
-      window: "Dec 28, 2024 - 02:00-04:00 UTC",
-      impact: "Read-only mode during window",
-    },
-    {
-      title: "Auth service dependency upgrade",
-      window: "Jan 05, 2025 - 23:00-23:30 UTC",
-      impact: "Brief login unavailability",
-    },
-  ]
+  const [maintenanceTitle, setMaintenanceTitle] = useState("")
+  const [maintenanceMessage, setMaintenanceMessage] = useState("")
+  const [maintenanceImpact, setMaintenanceImpact] = useState("")
+  const [maintenanceStartsAt, setMaintenanceStartsAt] = useState("")
+  const [maintenanceEndsAt, setMaintenanceEndsAt] = useState("")
 
-  const stats = useMemo(() => {
-    return {
-      operational: services.filter((s) => s.status === "operational").length,
-      degraded: services.filter((s) => s.status === "degraded").length,
-      down: services.filter((s) => s.status === "down").length,
-      avgUptime: services.reduce((a, b) => a + b.uptime, 0) / services.length,
-      avgResponse: Math.round(services.reduce((a, b) => a + b.responseMs, 0) / services.length),
-    }
-  }, [services])
+  const [thresholdErrorRate, setThresholdErrorRate] = useState("5")
+  const [thresholdQueueWarn, setThresholdQueueWarn] = useState("25")
+  const [thresholdQueueCritical, setThresholdQueueCritical] = useState("60")
+  const [thresholdMaintenanceLead, setThresholdMaintenanceLead] = useState("120")
 
-  function refresh() {
-    setLastRefreshed(new Date())
+  const [signalApiRequests, setSignalApiRequests] = useState("1")
+  const [signalApi5xx, setSignalApi5xx] = useState("0")
+  const [signalAiQueue, setSignalAiQueue] = useState("0")
+  const [signalEmailQueue, setSignalEmailQueue] = useState("0")
+
+  function authHeaders() {
+    const token = localStorage.getItem("token")
+    return { Authorization: `Bearer ${token}` }
   }
 
-  return (
-    <DashboardShell user={currentAdmin} role="admin" title="System Health">
-      <div className="space-y-6">
-        {/* Header bar */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-2xl font-bold">Service Status</h2>
-            <p className="text-sm text-muted-foreground">
-              Real-time monitoring across {services.length} critical services - last refreshed{" "}
-              {lastRefreshed.toLocaleTimeString()}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Switch id="auto-refresh" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-              <Label htmlFor="auto-refresh" className="text-sm">
-                Auto-refresh
-              </Label>
-            </div>
-            <Button variant="outline" onClick={refresh}>
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Refresh
-            </Button>
-            <Button variant="outline">
-              <Download className="mr-2 h-4 w-4" />
-              Export report
-            </Button>
-          </div>
-        </div>
+  function hydrate(data: SystemHealthPayload) {
+    setPayload(data)
+    setThresholdErrorRate(String(data.config.errorRateSpikeThreshold))
+    setThresholdQueueWarn(String(data.config.queueDepthWarning))
+    setThresholdQueueCritical(String(data.config.queueDepthCritical))
+    setThresholdMaintenanceLead(String(data.config.maintenanceBannerLeadMin))
+    setSignalApiRequests(String(data.signal.apiRequestsLast5m))
+    setSignalApi5xx(String(data.signal.api5xxLast5m))
+    setSignalAiQueue(String(data.signal.aiQueueDepth))
+    setSignalEmailQueue(String(data.signal.emailQueueDepth))
 
-        {/* Overall banner */}
+    if (!data.services.some((service) => service.serviceKey === trendServiceKey)) {
+      setTrendServiceKey(data.services[0]?.serviceKey || "db")
+    }
+    if (!incidentServiceKey && data.services[0]) {
+      setIncidentServiceKey(data.services[0].serviceKey)
+    }
+  }
+
+  async function fetchData(showLoading = false) {
+    try {
+      if (showLoading) setLoading(true)
+      setError("")
+
+      const token = localStorage.getItem("token")
+      const [meRes, healthRes] = await Promise.all([
+        fetch("/api/auth/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch("/api/admin/system-health", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ])
+
+      const meData = await meRes.json()
+      const healthData = (await healthRes.json()) as SystemHealthPayload | { error?: string }
+
+      if (!healthRes.ok || !("services" in healthData)) {
+        throw new Error((healthData as { error?: string })?.error || "Failed to load system health")
+      }
+
+      if (meRes.ok) {
+        const meUser = meData.user
+        setShellUser({
+          id: meUser?.id || fallbackShellUser.id,
+          email: meUser?.email || fallbackShellUser.email,
+          name: meUser?.email?.split("@")?.[0] || fallbackShellUser.name,
+          role: "admin",
+          createdAt:
+            typeof meUser?.createdAt === "string"
+              ? meUser.createdAt
+              : fallbackShellUser.createdAt,
+          avatarUrl: "/placeholder.svg",
+        })
+      }
+
+      hydrate(healthData)
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.message || "Could not load system health.")
+    } finally {
+      if (showLoading) setLoading(false)
+    }
+  }
+
+  async function runAction(body: Record<string, unknown>, successNotice: string) {
+    try {
+      setBusy(true)
+      setError("")
+
+      const res = await fetch("/api/admin/system-health", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+        body: JSON.stringify(body),
+      })
+
+      const data = (await res.json()) as SystemHealthPayload | { error?: string }
+      if (!res.ok || !("services" in data)) {
+        throw new Error((data as { error?: string })?.error || "Action failed")
+      }
+
+      hydrate(data)
+      setNotice(successNotice)
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.message || "Action failed.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchData(true)
+    const intervalId = window.setInterval(() => {
+      void fetchData()
+    }, 15000)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  const trendPoints = useMemo(() => {
+    if (!payload) return []
+    const trendSet = payload.trends?.[trendServiceKey]
+    if (!trendSet) return []
+    if (trendRange === "24h") return trendSet.h24
+    if (trendRange === "7d") return trendSet.d7
+    return trendSet.d30
+  }, [payload, trendRange, trendServiceKey])
+
+  if (loading || !payload) {
+    return (
+      <DashboardShell user={shellUser} role="admin" title="System Health">
+        <div className="p-6">Loading system health...</div>
+      </DashboardShell>
+    )
+  }
+
+  const overallStatus =
+    payload.statusCounts.down > 0
+      ? "critical"
+      : payload.statusCounts.degraded > 0
+        ? "degraded"
+        : "healthy"
+
+  return (
+    <DashboardShell user={shellUser} role="admin" title="System Health">
+      <div className="space-y-6">
+        {error && (
+          <Card className="border-red-500/30">
+            <CardContent className="p-4 text-sm text-red-500">{error}</CardContent>
+          </Card>
+        )}
+
+        {notice && (
+          <Card className="border-emerald-500/30">
+            <CardContent className="p-4 text-sm text-emerald-600">{notice}</CardContent>
+          </Card>
+        )}
+
         <Card
           className={
-            stats.down > 0
-              ? "border-destructive/40 bg-destructive/5"
-              : stats.degraded > 0
-                ? "border-warning/40 bg-warning/5"
-                : "border-success/40 bg-success/5"
+            overallStatus === "critical"
+              ? "border-red-500/30"
+              : overallStatus === "degraded"
+                ? "border-amber-500/30"
+                : "border-emerald-500/30"
           }
         >
-          <CardContent className="flex items-center justify-between gap-4 p-5">
-            <div className="flex items-center gap-4">
-              <div
-                className={`flex h-12 w-12 items-center justify-center rounded-xl ${
-                  stats.down > 0
-                    ? "bg-destructive/15 text-destructive"
-                    : stats.degraded > 0
-                      ? "bg-warning/15 text-warning"
-                      : "bg-success/15 text-success"
-                }`}
-              >
-                {stats.down > 0 ? (
-                  <XCircle className="h-6 w-6" />
-                ) : stats.degraded > 0 ? (
-                  <AlertTriangle className="h-6 w-6" />
-                ) : (
-                  <CheckCircle2 className="h-6 w-6" />
-                )}
-              </div>
-              <div>
-                <h3 className="text-lg font-bold">
-                  {stats.down > 0
-                    ? "Critical issues detected"
-                    : stats.degraded > 0
-                      ? "Degraded performance"
-                      : "All systems operational"}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {stats.operational} operational, {stats.degraded} degraded, {stats.down} down - avg uptime{" "}
-                  {stats.avgUptime.toFixed(2)}%
-                </p>
-              </div>
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+            <div>
+              <p className="text-sm text-muted-foreground">Overall status</p>
+              <p className="text-xl font-semibold capitalize">{overallStatus}</p>
+              <p className="text-xs text-muted-foreground">
+                Last scan: {new Date(payload.generatedAt).toLocaleString()}
+              </p>
             </div>
-            <div className="hidden text-right md:block">
-              <p className="text-xs text-muted-foreground">Average response</p>
-              <p className="text-2xl font-bold tabular-nums">{stats.avgResponse}ms</p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => fetchData()} disabled={busy}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Refresh
+              </Button>
+              <Button
+                onClick={() => runAction({ action: "run_health_scan" }, "Health scan completed.")}
+                disabled={busy}
+              >
+                <Activity className="mr-2 h-4 w-4" />
+                Run full scan
+              </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <StatCard icon={Activity} label="Monitored" value={services.length.toString()} tone="primary" />
-          <StatCard icon={CheckCircle2} label="Operational" value={stats.operational.toString()} tone="success" />
-          <StatCard icon={AlertTriangle} label="Degraded" value={stats.degraded.toString()} tone="warning" />
-          <StatCard icon={XCircle} label="Down" value={stats.down.toString()} tone="destructive" />
-          <StatCard
-            icon={Clock3}
-            label="Avg Uptime"
-            value={`${stats.avgUptime.toFixed(2)}%`}
-            tone={stats.avgUptime >= 99.5 ? "success" : "warning"}
-          />
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard icon={CheckCircle2} label="Operational" value={String(payload.statusCounts.operational)} />
+          <MetricCard icon={AlertTriangle} label="Degraded" value={String(payload.statusCounts.degraded)} />
+          <MetricCard icon={XCircle} label="Down" value={String(payload.statusCounts.down)} />
+          <MetricCard icon={Server} label="Services" value={String(payload.services.length)} />
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-4">
-          <div className="space-y-6 xl:col-span-3">
-            {/* Service list */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <LineChart className="h-5 w-5 text-primary" />
-                  Live Service Status
-                </CardTitle>
-                <CardDescription>Detailed metrics for every monitored service</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {services.map((service) => {
-                  const Icon = getServiceIcon(service.service)
-                  const tone =
-                    service.status === "operational"
-                      ? "success"
-                      : service.status === "degraded"
-                        ? "warning"
-                        : "destructive"
-                  return (
-                    <div key={service.service} className="rounded-xl border p-5">
-                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                        <div className="flex min-w-0 flex-1 items-start gap-4">
-                          <div
-                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-${tone}/10 text-${tone}`}
-                          >
-                            <Icon className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0 flex-1 space-y-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="font-semibold">{service.service}</h3>
-                              <Badge
-                                variant="outline"
-                                className={
-                                  tone === "success"
-                                    ? "border-success/30 bg-success/10 text-success"
-                                    : tone === "warning"
-                                      ? "border-warning/30 bg-warning/10 text-warning"
-                                      : "border-destructive/30 bg-destructive/10 text-destructive"
-                                }
-                              >
-                                {service.status === "operational" && <CheckCircle2 className="mr-1 h-3 w-3" />}
-                                {service.status === "degraded" && <AlertTriangle className="mr-1 h-3 w-3" />}
-                                {service.status === "down" && <XCircle className="mr-1 h-3 w-3" />}
-                                {service.status}
-                              </Badge>
-                              <span className="text-xs text-muted-foreground">
-                                Last check {new Date(service.lastChecked).toLocaleTimeString()}
-                              </span>
-                            </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Live Service Status Grid</CardTitle>
+            <CardDescription>
+              Database, API, AI microservice, email gateway, and file storage.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            {payload.services.map((service) => {
+              const Icon = serviceIcon(service.serviceKey)
+              return (
+                <div key={service.serviceKey} className="rounded-xl border p-4">
+                  <div className="flex items-center justify-between">
+                    <Icon className="h-5 w-5 text-primary" />
+                    <Badge className={toneClass(service.status)}>{service.status}</Badge>
+                  </div>
+                  <p className="mt-2 font-medium">{service.serviceName}</p>
+                  <p className="text-xs text-muted-foreground">{service.responseMs}ms response</p>
+                  <p className="text-xs text-muted-foreground">
+                    RPM: {service.requestPerMin ?? 0}
+                  </p>
+                  {service.errorRatePercent !== null && (
+                    <p className="text-xs text-muted-foreground">
+                      Error: {service.errorRatePercent.toFixed(2)}%
+                    </p>
+                  )}
+                  {service.queueDepth !== null && (
+                    <p className="text-xs text-muted-foreground">Queue: {service.queueDepth}</p>
+                  )}
+                  {service.details && (
+                    <p className="mt-1 text-xs text-muted-foreground">{service.details}</p>
+                  )}
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
 
-                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                              <MetricBlock
-                                icon={Clock3}
-                                label="Uptime"
-                                value={`${service.uptime}%`}
-                                progress={service.uptime}
-                              />
-                              <MetricBlock
-                                icon={Zap}
-                                label="Response"
-                                value={`${service.responseMs}ms`}
-                                hint={service.responseMs < 100 ? "Excellent" : service.responseMs < 250 ? "Normal" : "Slow"}
-                              />
-                              <MetricBlock
-                                icon={Wifi}
-                                label="Req/min"
-                                value={service.requestsPerMin.toLocaleString()}
-                              />
-                              <MetricBlock
-                                icon={AlertTriangle}
-                                label="Error rate"
-                                value={`${service.errorRate.toFixed(2)}%`}
-                                tone={service.errorRate > 1 ? "warning" : "default"}
-                              />
-                            </div>
-                          </div>
-                        </div>
+        <div className="grid gap-6 xl:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle>Resource Gauges</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <GaugeRow icon={Cpu} label="CPU" value={payload.resources.cpuPercent} />
+              <GaugeRow icon={Server} label="Memory" value={payload.resources.memoryPercent} />
+              <GaugeRow
+                icon={HardDrive}
+                label="Storage"
+                value={payload.resources.storagePercent ?? 0}
+              />
+              <div className="rounded-lg border p-3 text-sm">
+                <p className="text-muted-foreground">DB connections</p>
+                <p className="text-xl font-semibold">{payload.resources.dbConnections ?? "n/a"}</p>
+              </div>
+            </CardContent>
+          </Card>
 
-                        <div className="flex gap-2 xl:flex-col xl:shrink-0">
-                          <Button variant="outline" size="sm">
-                            <Terminal className="mr-2 h-4 w-4" />
-                            Logs
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <Play className="mr-2 h-4 w-4" />
-                            Run check
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <LineChart className="mr-2 h-4 w-4" />
-                            Details
-                          </Button>
-                        </div>
-                      </div>
+          <Card className="xl:col-span-2">
+            <CardHeader>
+              <CardTitle>Uptime & Response Trends</CardTitle>
+              <CardDescription>24h / 7d / 30d trend points per service.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Service</Label>
+                  <Select value={trendServiceKey} onValueChange={setTrendServiceKey}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {payload.services.map((service) => (
+                        <SelectItem key={service.serviceKey} value={service.serviceKey}>
+                          {service.serviceName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Range</Label>
+                  <Select
+                    value={trendRange}
+                    onValueChange={(value: "24h" | "7d" | "30d") => setTrendRange(value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="24h">24h</SelectItem>
+                      <SelectItem value="7d">7d</SelectItem>
+                      <SelectItem value="30d">30d</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {trendPoints.slice(-12).map((point) => (
+                  <div key={point.timestamp} className="rounded-md border p-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span>{new Date(point.timestamp).toLocaleString()}</span>
+                      <span>{point.avgResponseMs}ms</span>
                     </div>
+                    <Progress value={point.uptimePercent} className="mt-2 h-2" />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Uptime {point.uptimePercent.toFixed(1)}%
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle>Error-Rate Monitor</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm">
+                Current 5xx rate:{" "}
+                <span className={payload.alerts.errorSpike ? "text-red-600 font-semibold" : "font-semibold"}>
+                  {payload.alerts.errorRatePercent.toFixed(2)}%
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Requests last 5m: {payload.signal.apiRequestsLast5m} • 5xx: {payload.signal.api5xxLast5m}
+              </p>
+              <div className="space-y-2">
+                <Label>Spike threshold %</Label>
+                <Input
+                  value={thresholdErrorRate}
+                  onChange={(e) => setThresholdErrorRate(e.target.value)}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Queue Depth</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm">
+                AI queue depth:{" "}
+                <span className={payload.alerts.queueSpike ? "text-amber-700 font-semibold" : "font-semibold"}>
+                  {payload.signal.aiQueueDepth}
+                </span>
+              </p>
+              <div className="space-y-2">
+                <Label>Queue warning threshold</Label>
+                <Input
+                  value={thresholdQueueWarn}
+                  onChange={(e) => setThresholdQueueWarn(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Queue critical threshold</Label>
+                <Input
+                  value={thresholdQueueCritical}
+                  onChange={(e) => setThresholdQueueCritical(e.target.value)}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Signal Input</CardTitle>
+              <CardDescription>Update runtime counters used for spike/congestion alerts.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Input
+                value={signalApiRequests}
+                onChange={(e) => setSignalApiRequests(e.target.value)}
+                placeholder="API requests last 5m"
+              />
+              <Input
+                value={signalApi5xx}
+                onChange={(e) => setSignalApi5xx(e.target.value)}
+                placeholder="API 5xx last 5m"
+              />
+              <Input
+                value={signalAiQueue}
+                onChange={(e) => setSignalAiQueue(e.target.value)}
+                placeholder="AI queue depth"
+              />
+              <Input
+                value={signalEmailQueue}
+                onChange={(e) => setSignalEmailQueue(e.target.value)}
+                placeholder="Email queue depth"
+              />
+              <Button
+                onClick={() =>
+                  runAction(
+                    {
+                      action: "update_signal",
+                      apiRequestsLast5m: Number(signalApiRequests),
+                      api5xxLast5m: Number(signalApi5xx),
+                      aiQueueDepth: Number(signalAiQueue),
+                      emailQueueDepth: Number(signalEmailQueue),
+                    },
+                    "Runtime signals updated."
                   )
-                })}
-              </CardContent>
-            </Card>
+                }
+                disabled={busy}
+              >
+                Update Signals
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
 
-            {/* Incident log */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ScrollText className="h-5 w-5 text-primary" />
-                  Incident Log
-                </CardTitle>
-                <CardDescription>Recent incidents across monitored services</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {incidents.map((inc, idx) => (
-                  <div key={inc.id}>
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                            inc.severity === "high"
-                              ? "bg-destructive/10 text-destructive"
-                              : inc.severity === "medium"
-                                ? "bg-warning/10 text-warning"
-                                : "bg-muted text-muted-foreground"
-                          }`}
-                        >
-                          <AlertTriangle className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h4 className="font-medium">{inc.title}</h4>
-                            <Badge
-                              variant="outline"
-                              className={
-                                inc.status === "resolved"
-                                  ? "border-success/30 bg-success/10 text-success"
-                                  : inc.status === "investigating"
-                                    ? "border-warning/30 bg-warning/10 text-warning"
-                                    : "border-primary/30 bg-primary/10 text-primary"
-                              }
-                            >
-                              {inc.status}
-                            </Badge>
-                          </div>
-                          <p className="text-sm text-muted-foreground">{inc.description}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {inc.service} - {inc.startedAt} - Duration: {inc.duration}
-                          </p>
-                        </div>
-                      </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Threshold Configuration</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-4">
+            <div className="space-y-2">
+              <Label>Error spike threshold</Label>
+              <Input value={thresholdErrorRate} onChange={(e) => setThresholdErrorRate(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Queue warning</Label>
+              <Input value={thresholdQueueWarn} onChange={(e) => setThresholdQueueWarn(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Queue critical</Label>
+              <Input value={thresholdQueueCritical} onChange={(e) => setThresholdQueueCritical(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Maintenance banner lead (min)</Label>
+              <Input
+                value={thresholdMaintenanceLead}
+                onChange={(e) => setThresholdMaintenanceLead(e.target.value)}
+              />
+            </div>
+            <div className="md:col-span-4">
+              <Button
+                onClick={() =>
+                  runAction(
+                    {
+                      action: "update_config",
+                      errorRateSpikeThreshold: Number(thresholdErrorRate),
+                      queueDepthWarning: Number(thresholdQueueWarn),
+                      queueDepthCritical: Number(thresholdQueueCritical),
+                      maintenanceBannerLeadMin: Number(thresholdMaintenanceLead),
+                    },
+                    "Threshold configuration saved."
+                  )
+                }
+                disabled={busy}
+              >
+                Save Config
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Incident Log</CardTitle>
+              <CardDescription>Create and track incidents by severity and owner.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Service</Label>
+                  <Select value={incidentServiceKey} onValueChange={setIncidentServiceKey}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {payload.services.map((service) => (
+                        <SelectItem key={service.serviceKey} value={service.serviceKey}>
+                          {service.serviceName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Severity</Label>
+                  <Select value={incidentSeverity} onValueChange={setIncidentSeverity}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">low</SelectItem>
+                      <SelectItem value="medium">medium</SelectItem>
+                      <SelectItem value="high">high</SelectItem>
+                      <SelectItem value="critical">critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <Input value={incidentTitle} onChange={(e) => setIncidentTitle(e.target.value)} placeholder="Incident title" />
+              <Input
+                value={incidentOwnerEmail}
+                onChange={(e) => setIncidentOwnerEmail(e.target.value)}
+                placeholder="Owner email (optional)"
+              />
+              <Textarea
+                rows={3}
+                value={incidentDescription}
+                onChange={(e) => setIncidentDescription(e.target.value)}
+                placeholder="Incident description"
+              />
+              <Button
+                onClick={() =>
+                  runAction(
+                    {
+                      action: "create_incident",
+                      serviceKey: incidentServiceKey,
+                      title: incidentTitle,
+                      severity: incidentSeverity,
+                      ownerEmail: incidentOwnerEmail,
+                      description: incidentDescription,
+                    },
+                    "Incident created."
+                  )
+                }
+                disabled={busy || !incidentTitle.trim()}
+              >
+                Create incident
+              </Button>
+              <div className="space-y-2">
+                {payload.incidents.map((incident) => (
+                  <div key={incident.id} className="rounded-lg border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">{incident.title}</p>
+                      <Badge variant="outline">
+                        {incident.severity} • {incident.status}
+                      </Badge>
                     </div>
-                    {idx < incidents.length - 1 && <Separator className="mt-3" />}
+                    <p className="text-xs text-muted-foreground">
+                      {incident.serviceKey} • Owner {incident.ownerEmail || "unassigned"} •{" "}
+                      {new Date(incident.createdAt).toLocaleString()}
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || incident.status === "resolved"}
+                        onClick={() =>
+                          runAction(
+                            {
+                              action: "update_incident",
+                              incidentId: incident.id,
+                              status: "resolved",
+                            },
+                            "Incident marked resolved."
+                          )
+                        }
+                      >
+                        Resolve
+                      </Button>
+                    </div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Health Summary</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <SummaryRow label="Operational" value={stats.operational} tone="success" />
-                <SummaryRow label="Degraded" value={stats.degraded} tone="warning" />
-                <SummaryRow label="Down" value={stats.down} tone="destructive" />
-                <Separator />
-                <SummaryRow label="Avg uptime" value={`${stats.avgUptime.toFixed(2)}%`} />
-                <SummaryRow label="Avg response" value={`${stats.avgResponse}ms`} />
-                <SummaryRow label="Open incidents" value={incidents.filter((i) => i.status !== "resolved").length} />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Alert Preferences</CardTitle>
-                <CardDescription>How admins get notified</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Degradation alerts</p>
-                    <p className="text-xs text-muted-foreground">Notify on uptime drop</p>
-                  </div>
-                  <Switch checked={alertsEnabled} onCheckedChange={setAlertsEnabled} />
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Downtime alerts</p>
-                    <p className="text-xs text-muted-foreground">Immediate page to on-call</p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Weekly digest</p>
-                    <p className="text-xs text-muted-foreground">Sunday at 09:00 UTC</p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-primary" />
-                  Scheduled Maintenance
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {maintenance.map((m) => (
-                  <div key={m.title} className="rounded-lg border p-3">
-                    <p className="text-sm font-medium">{m.title}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{m.window}</p>
-                    <p className="mt-1 text-xs text-warning">{m.impact}</p>
+          <Card>
+            <CardHeader>
+              <CardTitle>Scheduled Maintenance Windows</CardTitle>
+              <CardDescription>
+                Published windows auto-appear as banner announcements near start time.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Input
+                value={maintenanceTitle}
+                onChange={(e) => setMaintenanceTitle(e.target.value)}
+                placeholder="Maintenance title"
+              />
+              <Textarea
+                rows={2}
+                value={maintenanceMessage}
+                onChange={(e) => setMaintenanceMessage(e.target.value)}
+                placeholder="Maintenance message"
+              />
+              <Input
+                value={maintenanceImpact}
+                onChange={(e) => setMaintenanceImpact(e.target.value)}
+                placeholder="Impact (optional)"
+              />
+              <div className="grid gap-2 md:grid-cols-2">
+                <Input type="datetime-local" value={maintenanceStartsAt} onChange={(e) => setMaintenanceStartsAt(e.target.value)} />
+                <Input type="datetime-local" value={maintenanceEndsAt} onChange={(e) => setMaintenanceEndsAt(e.target.value)} />
+              </div>
+              <Button
+                onClick={() =>
+                  runAction(
+                    {
+                      action: "create_maintenance_window",
+                      title: maintenanceTitle,
+                      message: maintenanceMessage,
+                      impact: maintenanceImpact,
+                      startsAt: maintenanceStartsAt,
+                      endsAt: maintenanceEndsAt,
+                    },
+                    "Maintenance window created."
+                  )
+                }
+                disabled={
+                  busy ||
+                  !maintenanceTitle.trim() ||
+                  !maintenanceMessage.trim() ||
+                  !maintenanceStartsAt ||
+                  !maintenanceEndsAt
+                }
+              >
+                Add window
+              </Button>
+              <div className="space-y-2">
+                {payload.maintenanceWindows.map((windowItem) => (
+                  <div key={windowItem.id} className="rounded-lg border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">{windowItem.title}</p>
+                      {windowItem.activeNow ? (
+                        <Badge className="border-red-500/30 bg-red-500/10 text-red-600">active</Badge>
+                      ) : windowItem.startsSoon ? (
+                        <Badge className="border-amber-500/30 bg-amber-500/10 text-amber-700">starts soon</Badge>
+                      ) : (
+                        <Badge variant="outline">scheduled</Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(windowItem.startsAt).toLocaleString()} -{" "}
+                      {new Date(windowItem.endsAt).toLocaleString()}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{windowItem.message}</p>
+                    <div className="mt-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() =>
+                          runAction(
+                            {
+                              action: "delete_maintenance_window",
+                              windowId: windowItem.id,
+                            },
+                            "Maintenance window deleted."
+                          )
+                        }
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Quick Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Button variant="outline" className="w-full justify-start bg-transparent">
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Run full health scan
-                </Button>
-                <Button variant="outline" className="w-full justify-start bg-transparent">
-                  <ScrollText className="mr-2 h-4 w-4" />
-                  Open incident tracker
-                </Button>
-                <Button variant="outline" className="w-full justify-start bg-transparent">
-                  <Download className="mr-2 h-4 w-4" />
-                  Export health report
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </DashboardShell>
   )
 }
 
-function StatCard({
+function MetricCard({
   icon: Icon,
   label,
   value,
-  tone,
 }: {
-  icon: React.ComponentType<{ className?: string }>
+  icon: ComponentType<{ className?: string }>
   label: string
   value: string
-  tone: "primary" | "success" | "warning" | "destructive" | "chart-2"
 }) {
-  const toneClasses = {
-    primary: "bg-primary/10 text-primary",
-    success: "bg-success/10 text-success",
-    warning: "bg-warning/10 text-warning",
-    destructive: "bg-destructive/10 text-destructive",
-    "chart-2": "bg-chart-2/10 text-chart-2",
-  }
   return (
     <Card>
-      <CardContent className="flex items-center gap-3 p-4">
-        <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${toneClasses[tone]}`}>
-          <Icon className="h-5 w-5" />
-        </div>
+      <CardContent className="flex items-center justify-between p-4">
         <div>
           <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="text-xl font-bold tabular-nums">{value}</p>
+          <p className="text-2xl font-semibold">{value}</p>
+        </div>
+        <div className="rounded-lg bg-primary/10 p-2">
+          <Icon className="h-5 w-5 text-primary" />
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function MetricBlock({
+function GaugeRow({
   icon: Icon,
   label,
   value,
-  progress,
-  hint,
-  tone,
 }: {
-  icon: React.ComponentType<{ className?: string }>
+  icon: ComponentType<{ className?: string }>
   label: string
-  value: string
-  progress?: number
-  hint?: string
-  tone?: "default" | "warning"
+  value: number
 }) {
   return (
-    <div className="rounded-lg border bg-muted/20 p-2.5">
-      <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Icon className="h-3 w-3" />
-        <span>{label}</span>
+    <div className="rounded-lg border p-3">
+      <div className="flex items-center justify-between text-sm">
+        <span className="inline-flex items-center gap-2">
+          <Icon className="h-4 w-4 text-primary" />
+          {label}
+        </span>
+        <span>{value.toFixed(1)}%</span>
       </div>
-      <p className={`font-semibold tabular-nums ${tone === "warning" ? "text-warning" : ""}`}>{value}</p>
-      {progress !== undefined && <Progress value={progress} className="mt-1.5 h-1" />}
-      {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
-    </div>
-  )
-}
-
-function SummaryRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string | number
-  tone?: "success" | "warning" | "destructive"
-}) {
-  const toneClass =
-    tone === "success"
-      ? "text-success"
-      : tone === "warning"
-        ? "text-warning"
-        : tone === "destructive"
-          ? "text-destructive"
-          : "text-foreground"
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`font-semibold tabular-nums ${toneClass}`}>{value}</span>
+      <Progress value={Math.max(0, Math.min(100, value))} className="mt-2 h-2" />
     </div>
   )
 }

@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
 import { signToken } from "@/lib/auth"
 
+const db = prisma as any
+
 type LoginBody = {
   email?: string
   password?: string
@@ -22,7 +24,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const user = await prisma.user.findUnique({
+    const user = await db.user.findUnique({
       where: { email },
       select: {
         id: true,
@@ -31,6 +33,16 @@ export async function POST(req: Request) {
         role: true,
         status: true,
         sessionVersion: true,
+        studentProfile: {
+          select: {
+            onboardingCompleted: true,
+          },
+        },
+        supervisorProfile: {
+          select: {
+            onboardingCompleted: true,
+          },
+        },
       },
     })
 
@@ -70,6 +82,14 @@ export async function POST(req: Request) {
       sessionVersion: user.sessionVersion,
     })
 
+    const needsStudentOnboarding =
+      user.role === "STUDENT" &&
+      user.studentProfile?.onboardingCompleted === false
+
+    const needsSupervisorOnboarding =
+      user.role === "SUPERVISOR" &&
+      user.supervisorProfile?.onboardingCompleted !== true
+
     return NextResponse.json({
       token,
       user: {
@@ -77,6 +97,7 @@ export async function POST(req: Request) {
         email: user.email,
         role: user.role,
       },
+      needsOnboarding: needsStudentOnboarding || needsSupervisorOnboarding,
     })
   } catch (err) {
     console.error(err)

@@ -18,34 +18,34 @@ type GuidedResponse = {
 
 const fallbackQuestions: GuidedQuestion[] = [
   {
-    id: "topicAreas",
-    question: "What topic areas interest you most?",
-    placeholder: "Example: AI, cybersecurity, web engineering",
+    id: "supervisionDomains",
+    question: "Which topic areas can you supervise confidently?",
+    placeholder: "Example: AI, data science, cybersecurity, web systems",
   },
   {
-    id: "projectKind",
-    question: "What kind of project do you want to do?",
-    placeholder: "Example: practical app build, research prototype, analytics platform",
+    id: "preferredProjectType",
+    question: "What project style do you supervise best?",
+    placeholder: "Example: practical build, research-heavy, or hybrid",
   },
   {
-    id: "knownTechnologies",
-    question: "What technologies do you already know?",
-    placeholder: "Example: React, Python, SQL",
+    id: "coreTechnologies",
+    question: "Which technologies and methods are your strongest?",
+    placeholder: "Example: Python, React, cloud systems, model evaluation",
   },
   {
-    id: "learningTechnologies",
-    question: "What technologies do you want to learn?",
-    placeholder: "Example: Docker, cloud deployment, LLM tooling",
+    id: "studentSupportStrengths",
+    question: "What student goals do you best support?",
+    placeholder: "Example: applied product development, dissertation writing, experimentation",
   },
   {
-    id: "practicalVsResearch",
-    question: "Do you prefer a practical build project or a research-based project?",
-    placeholder: "Example: practical build with a small evaluation section",
+    id: "supervisionStyle",
+    question: "How would you describe your supervision style and expectations?",
+    placeholder: "Example: weekly progress check-ins with concise action points",
   },
   {
-    id: "existingIdea",
-    question: "Do you already have a project idea in mind?",
-    placeholder: "Share your idea even if it is rough",
+    id: "pastProjectThemes",
+    question: "What project themes have you supervised before?",
+    placeholder: "Example: recommendation systems, secure backend APIs, IoT dashboards",
   },
 ]
 
@@ -64,7 +64,7 @@ function firstUnansweredIndex(questions: GuidedQuestion[], values: Record<string
   return index
 }
 
-export default function StudentOnboardingPage() {
+export default function SupervisorOnboardingPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -88,7 +88,7 @@ export default function StudentOnboardingPage() {
       setError("")
 
       const token = localStorage.getItem("token")
-      const res = await fetch("/api/student/onboarding", {
+      const res = await fetch("/api/supervisor/onboarding", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -101,7 +101,7 @@ export default function StudentOnboardingPage() {
       }
 
       if (data?.onboardingCompleted) {
-        router.replace("/dashboard/student")
+        router.replace("/dashboard/supervisor")
         return
       }
 
@@ -113,12 +113,6 @@ export default function StudentOnboardingPage() {
       const responseMap = toResponseMap(
         Array.isArray(data?.responses) ? (data.responses as GuidedResponse[]) : []
       )
-
-      if (Object.keys(responseMap).length === 0 && data?.answers) {
-        responseMap.existingIdea = data.answers.projectIdea || ""
-        responseMap.knownTechnologies = data.answers.strengths || ""
-        responseMap.learningTechnologies = data.answers.weaknesses || ""
-      }
 
       const nextIndex = firstUnansweredIndex(incomingQuestions, responseMap)
       const activeQuestion = incomingQuestions[Math.max(0, nextIndex)]
@@ -194,7 +188,7 @@ export default function StudentOnboardingPage() {
         answer: responses[question.id] || "",
       }))
 
-      const res = await fetch("/api/student/onboarding", {
+      const res = await fetch("/api/supervisor/onboarding", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -209,7 +203,7 @@ export default function StudentOnboardingPage() {
         throw new Error(data?.error || "Failed to complete onboarding")
       }
 
-      router.replace("/dashboard/student")
+      router.replace("/dashboard/supervisor")
     } catch (err: any) {
       console.error(err)
       setError(err?.message || "Could not finish onboarding.")
@@ -230,10 +224,10 @@ export default function StudentOnboardingPage() {
     <div className="min-h-screen bg-background px-4 py-8 md:py-12">
       <div className="mx-auto w-full max-w-3xl rounded-2xl border bg-card p-5 shadow-sm md:p-8">
         <div className="mb-6">
-          <p className="text-sm text-muted-foreground">Guided AI onboarding conversation</p>
-          <h1 className="mt-1 text-2xl font-bold">Tell us about your project preferences</h1>
+          <p className="text-sm text-muted-foreground">Supervisor AI onboarding conversation</p>
+          <h1 className="mt-1 text-2xl font-bold">Set your supervision profile for matching</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            We use your answers to build structured matching signals and recommend supervisors with clearer reasoning.
+            Your answers are converted into structured matching signals so students see better aligned recommendations.
           </p>
           <p className="mt-3 text-sm text-muted-foreground">
             Progress: {answeredCount}/{questions.length} answered

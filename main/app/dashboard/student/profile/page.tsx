@@ -50,6 +50,9 @@ type StudentProfileApi = {
   fullName: string | null
   skills: string | null
   interests: string | null
+  onboardingProjectIdea?: string | null
+  onboardingStrengths?: string | null
+  onboardingWeaknesses?: string | null
 }
 
 function getInitials(name: string) {

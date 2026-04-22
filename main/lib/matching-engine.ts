@@ -79,6 +79,27 @@ export type StudentMatchResult = {
   }
 }
 
+type OnboardingSignalSet = {
+  preferredDomains?: string[]
+  desiredProjectType?: string
+  existingSkills?: string[]
+  learningGoals?: string[]
+  interestKeywords?: string[]
+  hasInitialIdea?: boolean
+  summary?: string
+}
+
+type SupervisorOnboardingSignalSet = {
+  expertiseDomains?: string[]
+  preferredProjectType?: string
+  coreTechnologies?: string[]
+  studentSupportStrengths?: string[]
+  supervisionStyle?: string
+  pastProjectThemes?: string[]
+  profileKeywords?: string[]
+  summary?: string
+}
+
 const DEFAULT_SETTINGS: MatchingSettings = {
   semanticWeight: 40,
   keywordWeight: 30,
@@ -227,6 +248,63 @@ function safeJsonParse(text: string) {
   }
 }
 
+function normalizeStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+  return input
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function parseOnboardingSignals(value: unknown): OnboardingSignalSet | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const raw = value as Record<string, unknown>
+
+  return {
+    preferredDomains: normalizeStringArray(raw.preferredDomains),
+    desiredProjectType:
+      typeof raw.desiredProjectType === "string"
+        ? raw.desiredProjectType
+        : undefined,
+    existingSkills: normalizeStringArray(raw.existingSkills),
+    learningGoals: normalizeStringArray(raw.learningGoals),
+    interestKeywords: normalizeStringArray(raw.interestKeywords),
+    hasInitialIdea:
+      typeof raw.hasInitialIdea === "boolean" ? raw.hasInitialIdea : undefined,
+    summary: typeof raw.summary === "string" ? raw.summary.trim() : undefined,
+  }
+}
+
+function parseSupervisorOnboardingSignals(
+  value: unknown
+): SupervisorOnboardingSignalSet | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const raw = value as Record<string, unknown>
+
+  return {
+    expertiseDomains: normalizeStringArray(raw.expertiseDomains),
+    preferredProjectType:
+      typeof raw.preferredProjectType === "string"
+        ? raw.preferredProjectType
+        : undefined,
+    coreTechnologies: normalizeStringArray(raw.coreTechnologies),
+    studentSupportStrengths: normalizeStringArray(raw.studentSupportStrengths),
+    supervisionStyle:
+      typeof raw.supervisionStyle === "string"
+        ? raw.supervisionStyle.trim()
+        : undefined,
+    pastProjectThemes: normalizeStringArray(raw.pastProjectThemes),
+    profileKeywords: normalizeStringArray(raw.profileKeywords),
+    summary: typeof raw.summary === "string" ? raw.summary.trim() : undefined,
+  }
+}
+
 function normalizeWeightSettings(settings: MatchingSettings): MatchingSettings {
   const sum =
     settings.semanticWeight +
@@ -262,12 +340,26 @@ function responseSpeedScore(avgResponseDays: number | null): number {
   return 0.2
 }
 
+function projectTypeAlignment(studentType: string, supervisorType: string): number {
+  const student = (studentType || "unspecified").toLowerCase()
+  const supervisor = (supervisorType || "unspecified").toLowerCase()
+
+  if (student === "unspecified" || supervisor === "unspecified") return 0.6
+  if (student === supervisor) return 1
+  if (student === "hybrid" || supervisor === "hybrid") return 0.75
+  return 0.35
+}
+
 function scoreMatch(params: {
   projectTitle: string
   projectDescription: string
   projectKeywords: string[]
   studentSkills: string[]
   studentInterests: string[]
+  onboardingDomains: string[]
+  onboardingLearningGoals: string[]
+  desiredProjectType: string
+  supervisorPreferredProjectType: string
   supervisorExpertise: string[]
   maxCapacity: number
   assignedStudents: number
@@ -280,6 +372,10 @@ function scoreMatch(params: {
     projectKeywords,
     studentSkills,
     studentInterests,
+    onboardingDomains,
+    onboardingLearningGoals,
+    desiredProjectType,
+    supervisorPreferredProjectType,
     supervisorExpertise,
     maxCapacity,
     assignedStudents,
@@ -293,25 +389,31 @@ function scoreMatch(params: {
   const keywordTerms = uniqueNormalizedPhrases(projectKeywords)
   const skillTerms = uniqueNormalizedPhrases(studentSkills)
   const interestTerms = uniqueNormalizedPhrases(studentInterests)
+  const onboardingDomainTerms = uniqueNormalizedPhrases(onboardingDomains)
+  const onboardingLearningTerms = uniqueNormalizedPhrases(onboardingLearningGoals)
 
   const titleAlignment = computeAlignment(titleTerms, expertiseTerms)
   const descriptionAlignment = computeAlignment(descriptionTerms, expertiseTerms)
   const keywordAlignment = computeAlignment(keywordTerms, expertiseTerms)
   const skillAlignment = computeAlignment(skillTerms, expertiseTerms)
   const interestAlignment = computeAlignment(interestTerms, expertiseTerms)
+  const domainAlignment = computeAlignment(onboardingDomainTerms, expertiseTerms)
+  const learningGoalAlignment = computeAlignment(onboardingLearningTerms, expertiseTerms)
 
   const semanticSignals = [
-    { value: titleAlignment.score, enabled: titleTerms.length > 0, weight: 0.35 },
-    { value: descriptionAlignment.score, enabled: descriptionTerms.length > 0, weight: 0.35 },
-    { value: skillAlignment.score, enabled: skillTerms.length > 0, weight: 0.15 },
-    { value: interestAlignment.score, enabled: interestTerms.length > 0, weight: 0.15 },
+    { value: titleAlignment.score, enabled: titleTerms.length > 0, weight: 0.24 },
+    { value: descriptionAlignment.score, enabled: descriptionTerms.length > 0, weight: 0.24 },
+    { value: skillAlignment.score, enabled: skillTerms.length > 0, weight: 0.14 },
+    { value: interestAlignment.score, enabled: interestTerms.length > 0, weight: 0.14 },
+    { value: domainAlignment.score, enabled: onboardingDomainTerms.length > 0, weight: 0.12 },
+    { value: learningGoalAlignment.score, enabled: onboardingLearningTerms.length > 0, weight: 0.12 },
   ]
 
   const semanticWeightSum = semanticSignals
     .filter((item) => item.enabled)
     .reduce((sum, item) => sum + item.weight, 0)
 
-  const semanticScore =
+  const semanticBaseScore =
     semanticWeightSum > 0
       ? semanticSignals
           .filter((item) => item.enabled)
@@ -319,7 +421,41 @@ function scoreMatch(params: {
         semanticWeightSum
       : 0
 
-  const keywordScore = keywordAlignment.score
+  const projectTypeScore = projectTypeAlignment(
+    desiredProjectType,
+    supervisorPreferredProjectType
+  )
+
+  const semanticScore =
+    desiredProjectType !== "unspecified" ||
+    supervisorPreferredProjectType !== "unspecified"
+      ? semanticBaseScore * 0.9 + projectTypeScore * 0.1
+      : semanticBaseScore
+
+  const keywordSignals = [
+    {
+      value: keywordAlignment.score,
+      enabled: keywordTerms.length > 0,
+      weight: onboardingDomainTerms.length > 0 ? 0.7 : 1,
+    },
+    {
+      value: domainAlignment.score,
+      enabled: onboardingDomainTerms.length > 0,
+      weight: 0.3,
+    },
+  ]
+
+  const keywordWeightSum = keywordSignals
+    .filter((item) => item.enabled)
+    .reduce((sum, item) => sum + item.weight, 0)
+
+  const keywordScore =
+    keywordWeightSum > 0
+      ? keywordSignals
+          .filter((item) => item.enabled)
+          .reduce((sum, item) => sum + item.value * item.weight, 0) /
+        keywordWeightSum
+      : 0
 
   const normalizedCapacity = maxCapacity > 0 ? maxCapacity : 1
   const remainingSlots = Math.max(0, normalizedCapacity - assignedStudents)
@@ -340,35 +476,67 @@ function scoreMatch(params: {
 
   const focusTerms = mergeUniqueTerms(
     titleAlignment.matchedTerms,
-    keywordAlignment.matchedTerms
+    keywordAlignment.matchedTerms,
+    domainAlignment.matchedTerms
   ).slice(0, 3)
   const profileTerms = mergeUniqueTerms(
     skillAlignment.matchedTerms,
-    interestAlignment.matchedTerms
+    interestAlignment.matchedTerms,
+    learningGoalAlignment.matchedTerms
   ).slice(0, 3)
+  const domainTerms = domainAlignment.matchedTerms.slice(0, 3)
 
-  const reasons: string[] = []
+  const primaryReasons: string[] = []
 
   if (focusTerms.length > 0) {
-    reasons.push(`Project topics align with ${focusTerms.join(", ")}.`)
+    primaryReasons.push(`Project topics align with ${focusTerms.join(", ")}.`)
   }
 
   if (profileTerms.length > 0) {
-    reasons.push(`Student profile overlap is strong in ${profileTerms.join(", ")}.`)
+    primaryReasons.push(`Student profile overlap is strong in ${profileTerms.join(", ")}.`)
   }
 
-  reasons.push(
+  if (domainTerms.length > 0) {
+    primaryReasons.push(
+      `Onboarding interests align with supervisor strengths in ${domainTerms.join(", ")}.`
+    )
+  }
+
+  if (
+    desiredProjectType &&
+    desiredProjectType !== "unspecified" &&
+    supervisorPreferredProjectType &&
+    supervisorPreferredProjectType !== "unspecified"
+  ) {
+    if (projectTypeScore >= 0.9) {
+      primaryReasons.push(
+        `Project style preference aligns (${desiredProjectType}).`
+      )
+    } else if (projectTypeScore >= 0.7) {
+      primaryReasons.push(
+        `Project style fit is strong (student: ${desiredProjectType}, supervisor: ${supervisorPreferredProjectType}).`
+      )
+    }
+  } else if (desiredProjectType && desiredProjectType !== "unspecified") {
+    primaryReasons.push(
+      `Preferred project style (${desiredProjectType}) was included in this ranking.`
+    )
+  }
+
+  const capacityReason =
     `Capacity fit: ${remainingSlots}/${normalizedCapacity} slots available; avg response ${
       avgResponseDays === null ? "unknown" : `${avgResponseDays.toFixed(1)} days`
     }.`
-  )
+
+  const reasons = [...primaryReasons.slice(0, 2), capacityReason].slice(0, 3)
 
   return {
     scorePercent,
-    reasons: reasons.slice(0, 3),
+    reasons,
     evidenceTerms: mergeUniqueTerms(
       focusTerms,
       profileTerms,
+      domainTerms,
       descriptionAlignment.matchedTerms.slice(0, 2)
     ).slice(0, 6),
   }
@@ -380,6 +548,7 @@ async function getGeminiEnhancedMatches(params: {
   projectKeywords: string[]
   studentSkills: string[]
   studentInterests: string[]
+  onboardingSignals: OnboardingSignalSet | null
   candidates: Array<{
     supervisorId: string
     fullName: string
@@ -417,7 +586,7 @@ Return ONLY valid JSON in this exact shape:
 Rules:
 - aiScore must be an integer from 0 to 100.
 - reasons must contain exactly 3 short, specific strings.
-- Base your judgment on project fit, research fit, skill alignment, and keyword overlap.
+- Base your judgment on project fit, research fit, skill alignment, onboarding preferences, and keyword overlap.
 - Prefer supervisors whose expertise is clearly relevant.
 - Do not invent facts not present in the input.
 - Keep all reasons concise and professional.
@@ -430,6 +599,7 @@ ${JSON.stringify({
   keywords: params.projectKeywords,
   studentSkills: params.studentSkills,
   studentInterests: params.studentInterests,
+  onboardingSignals: params.onboardingSignals,
 })}
 
 Supervisor candidates:
@@ -546,6 +716,7 @@ export async function generateRecommendationsForStudent(
       fullName: true,
       skills: true,
       interests: true,
+      onboardingSignals: true,
     },
   })
 
@@ -607,8 +778,9 @@ export async function generateRecommendationsForStudent(
     )
   })
 
-  const supervisors = await prisma.supervisorProfile.findMany({
+  const supervisors = (await (prisma as any).supervisorProfile.findMany({
     where: {
+      onboardingCompleted: true,
       acceptingStudents: true,
       user: {
         role: "SUPERVISOR",
@@ -623,6 +795,7 @@ export async function generateRecommendationsForStudent(
       userId: true,
       fullName: true,
       expertise: true,
+      onboardingSignals: true,
       maxCapacity: true,
       user: {
         select: {
@@ -630,17 +803,53 @@ export async function generateRecommendationsForStudent(
         },
       },
     },
-  })
+  })) as Array<{
+    id: string
+    userId: string
+    fullName: string | null
+    expertise: string | null
+    onboardingSignals: unknown
+    maxCapacity: number
+    user: { email: string }
+  }>
 
   const studentSkills = splitCsv(studentProfile?.skills)
   const studentInterests = splitCsv(studentProfile?.interests)
+  const onboardingSignals = parseOnboardingSignals(studentProfile?.onboardingSignals)
+  const onboardingDomains = onboardingSignals?.preferredDomains ?? []
+  const onboardingLearningGoals = onboardingSignals?.learningGoals ?? []
+  const onboardingSkills = onboardingSignals?.existingSkills ?? []
+  const onboardingKeywords = onboardingSignals?.interestKeywords ?? []
+  const desiredProjectType = onboardingSignals?.desiredProjectType ?? "unspecified"
+
   const projectKeywords = splitCsv(project.keywords)
-  const projectDescription = project.description ?? ""
+  const enrichedProjectKeywords = mergeUniqueTerms(projectKeywords, onboardingKeywords, onboardingDomains)
+  const enrichedStudentSkills = mergeUniqueTerms(studentSkills, onboardingSkills)
+  const enrichedStudentInterests = mergeUniqueTerms(
+    studentInterests,
+    onboardingDomains,
+    onboardingLearningGoals
+  )
+  const projectDescription = [project.description ?? "", onboardingSignals?.summary || ""]
+    .filter(Boolean)
+    .join("\n\n")
   const projectTitle = project.title ?? "Untitled Project"
 
   const baselineMatches = supervisors
     .map((supervisor) => {
       const supervisorExpertise = splitCsv(supervisor.expertise)
+      const supervisorSignals = parseSupervisorOnboardingSignals(
+        supervisor.onboardingSignals
+      )
+      const enrichedSupervisorExpertise = mergeUniqueTerms(
+        supervisorExpertise,
+        supervisorSignals?.expertiseDomains ?? [],
+        supervisorSignals?.coreTechnologies ?? [],
+        supervisorSignals?.pastProjectThemes ?? [],
+        supervisorSignals?.profileKeywords ?? []
+      )
+      const supervisorPreferredProjectType =
+        supervisorSignals?.preferredProjectType ?? "unspecified"
       const assignedStudents =
         assignedCountBySupervisor.get(supervisor.userId) ?? 0
       const avgResponseDays = responseDaysMap.get(supervisor.userId) ?? null
@@ -648,10 +857,14 @@ export async function generateRecommendationsForStudent(
       const scored = scoreMatch({
         projectTitle,
         projectDescription,
-        projectKeywords,
-        studentSkills,
-        studentInterests,
-        supervisorExpertise,
+        projectKeywords: enrichedProjectKeywords,
+        studentSkills: enrichedStudentSkills,
+        studentInterests: enrichedStudentInterests,
+        onboardingDomains,
+        onboardingLearningGoals,
+        desiredProjectType,
+        supervisorPreferredProjectType,
+        supervisorExpertise: enrichedSupervisorExpertise,
         maxCapacity: supervisor.maxCapacity,
         assignedStudents,
         avgResponseDays,
@@ -664,7 +877,7 @@ export async function generateRecommendationsForStudent(
           userId: supervisor.userId,
           fullName: supervisor.fullName,
           email: supervisor.user.email,
-          expertise: supervisorExpertise,
+          expertise: enrichedSupervisorExpertise,
           maxCapacity: supervisor.maxCapacity,
           assignedStudents,
           requestStatus:
@@ -689,9 +902,10 @@ export async function generateRecommendationsForStudent(
       ? await getGeminiEnhancedMatches({
           projectTitle,
           projectDescription,
-          projectKeywords,
-          studentSkills,
-          studentInterests,
+          projectKeywords: enrichedProjectKeywords,
+          studentSkills: enrichedStudentSkills,
+          studentInterests: enrichedStudentInterests,
+          onboardingSignals,
           candidates: topCandidates.map((item) => ({
             supervisorId: item.supervisor.id,
             fullName: item.supervisor.fullName || "Unnamed Supervisor",

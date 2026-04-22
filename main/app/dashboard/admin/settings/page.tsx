@@ -71,6 +71,54 @@ type AcademicPeriodForm = {
   finalSubmissionAt: string
 }
 
+type PlatformSettingsPayload = {
+  settings: {
+    institutionName: string
+    institutionLogoUrl: string | null
+    institutionFaviconUrl: string | null
+    platformDescription: string | null
+    supportEmail: string | null
+    defaultLocale: string
+    defaultTimezone: string
+    themeMode: string
+    featureMessagingEnabled: boolean
+    featureMeetingsEnabled: boolean
+    featureAnnouncementsEnabled: boolean
+    featureAiExplanationsEnabled: boolean
+    smtpProvider: string
+    smtpHost: string | null
+    smtpPort: number | null
+    smtpUser: string | null
+    smtpApiKeyMasked: string | null
+    aiProvider: string
+    aiModel: string | null
+    aiTemperature: number
+    aiRateLimitPerMin: number
+    aiApiKeyMasked: string | null
+    ssoProvider: string | null
+    ssoEnabled: boolean
+    lmsProvider: string | null
+    lmsEnabled: boolean
+    calendarProvider: string | null
+    calendarEnabled: boolean
+    sessionTimeoutMinutes: number
+    passwordMinLength: number
+    twoFactorRequiredForAdmin: boolean
+    ipAllowList: string | null
+    auditLoggingEnabled: boolean
+  }
+  apiKeys: Array<{
+    id: string
+    name: string
+    service: string
+    keyPrefix: string
+    lastUsedAt: string | null
+    revokedAt: string | null
+    createdAt: string
+  }>
+  createdSecret?: string
+}
+
 function toDateInput(value: string | null | undefined) {
   if (!value) return ""
   return value.slice(0, 10)
@@ -107,6 +155,13 @@ export default function AdminSettingsPage() {
   const [supportEmail, setSupportEmail] = useState("support@university.ac.uk")
   const [language, setLanguage] = useState("en")
   const [timezone, setTimezone] = useState("Europe/London")
+  const [institutionLogoUrl, setInstitutionLogoUrl] = useState("")
+  const [institutionFaviconUrl, setInstitutionFaviconUrl] = useState("")
+  const [themeMode, setThemeMode] = useState("dark")
+  const [featureMessagingEnabled, setFeatureMessagingEnabled] = useState(true)
+  const [featureMeetingsEnabled, setFeatureMeetingsEnabled] = useState(true)
+  const [featureAnnouncementsEnabled, setFeatureAnnouncementsEnabled] = useState(true)
+  const [featureAiExplanationsEnabled, setFeatureAiExplanationsEnabled] = useState(true)
 
   // Academic
   const [currentTerm, setCurrentTerm] = useState("2024-2025 Academic Year")
@@ -149,6 +204,27 @@ export default function AdminSettingsPage() {
   // Integrations
   const [smtpProvider, setSmtpProvider] = useState("sendgrid")
   const [aiProvider, setAiProvider] = useState("openai")
+  const [smtpHost, setSmtpHost] = useState("")
+  const [smtpPort, setSmtpPort] = useState("587")
+  const [smtpUser, setSmtpUser] = useState("")
+  const [smtpApiKey, setSmtpApiKey] = useState("")
+  const [smtpApiKeyMasked, setSmtpApiKeyMasked] = useState("")
+  const [aiModel, setAiModel] = useState("gpt-5.2")
+  const [aiTemperature, setAiTemperature] = useState("0.2")
+  const [aiRateLimitPerMin, setAiRateLimitPerMin] = useState("60")
+  const [aiApiKey, setAiApiKey] = useState("")
+  const [aiApiKeyMasked, setAiApiKeyMasked] = useState("")
+  const [ssoEnabled, setSsoEnabled] = useState(false)
+  const [lmsEnabled, setLmsEnabled] = useState(false)
+  const [calendarEnabled, setCalendarEnabled] = useState(false)
+  const [apiKeys, setApiKeys] = useState<PlatformSettingsPayload["apiKeys"]>([])
+  const [newApiKeyService, setNewApiKeyService] = useState("internal")
+  const [newApiKeyName, setNewApiKeyName] = useState("")
+  const [newlyGeneratedSecret, setNewlyGeneratedSecret] = useState("")
+
+  const [settingsBusy, setSettingsBusy] = useState(false)
+  const [settingsError, setSettingsError] = useState("")
+  const [settingsNotice, setSettingsNotice] = useState("")
 
   const [saved, setSaved] = useState(false)
 
@@ -193,6 +269,93 @@ export default function AdminSettingsPage() {
       setAcademicError(err?.message || "Could not load academic period settings.")
     } finally {
       setAcademicLoading(false)
+    }
+  }
+
+  async function fetchPlatformSettings() {
+    try {
+      setSettingsError("")
+      const token = localStorage.getItem("token")
+      const res = await fetch("/api/admin/settings", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      const data = (await res.json()) as PlatformSettingsPayload | { error?: string }
+
+      if (!res.ok || !("settings" in data)) {
+        throw new Error((data as { error?: string })?.error || "Failed to load platform settings")
+      }
+
+      const settings = data.settings
+      setPlatformName(settings.institutionName)
+      setPlatformDesc(settings.platformDescription || "")
+      setSupportEmail(settings.supportEmail || "")
+      setLanguage(settings.defaultLocale || "en")
+      setTimezone(settings.defaultTimezone || "Europe/London")
+      setInstitutionLogoUrl(settings.institutionLogoUrl || "")
+      setInstitutionFaviconUrl(settings.institutionFaviconUrl || "")
+      setThemeMode(settings.themeMode || "dark")
+      setFeatureMessagingEnabled(settings.featureMessagingEnabled)
+      setFeatureMeetingsEnabled(settings.featureMeetingsEnabled)
+      setFeatureAnnouncementsEnabled(settings.featureAnnouncementsEnabled)
+      setFeatureAiExplanationsEnabled(settings.featureAiExplanationsEnabled)
+      setSmtpProvider(settings.smtpProvider || "sendgrid")
+      setAiProvider(settings.aiProvider || "openai")
+      setSmtpHost(settings.smtpHost || "")
+      setSmtpPort(settings.smtpPort ? `${settings.smtpPort}` : "587")
+      setSmtpUser(settings.smtpUser || "")
+      setSmtpApiKeyMasked(settings.smtpApiKeyMasked || "")
+      setAiModel(settings.aiModel || "gpt-5.2")
+      setAiTemperature(`${settings.aiTemperature}`)
+      setAiRateLimitPerMin(`${settings.aiRateLimitPerMin}`)
+      setAiApiKeyMasked(settings.aiApiKeyMasked || "")
+      setSsoEnabled(settings.ssoEnabled)
+      setLmsEnabled(settings.lmsEnabled)
+      setCalendarEnabled(settings.calendarEnabled)
+      setSessionTimeout(`${settings.sessionTimeoutMinutes}`)
+      setPasswordMinLength(`${settings.passwordMinLength}`)
+      setTwoFactorRequired(settings.twoFactorRequiredForAdmin)
+      setIpAllowList(settings.ipAllowList || "")
+      setAuditLogging(settings.auditLoggingEnabled)
+      setApiKeys(data.apiKeys || [])
+    } catch (err: any) {
+      console.error(err)
+      setSettingsError(err?.message || "Could not load platform settings.")
+    }
+  }
+
+  async function runSettingsAction(body: Record<string, unknown>, notice: string) {
+    try {
+      setSettingsBusy(true)
+      setSettingsError("")
+      const token = localStorage.getItem("token")
+      const res = await fetch("/api/admin/settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      })
+      const data = (await res.json()) as PlatformSettingsPayload | { error?: string }
+      if (!res.ok || !("settings" in data)) {
+        throw new Error((data as { error?: string })?.error || "Settings action failed")
+      }
+      setApiKeys(data.apiKeys || [])
+      if ("createdSecret" in data && typeof data.createdSecret === "string") {
+        setNewlyGeneratedSecret(data.createdSecret)
+      }
+      setSmtpApiKey("")
+      setAiApiKey("")
+      setSettingsNotice(notice)
+      window.setTimeout(() => setSettingsNotice(""), 2800)
+      await fetchPlatformSettings()
+    } catch (err: any) {
+      console.error(err)
+      setSettingsError(err?.message || "Settings action failed.")
+    } finally {
+      setSettingsBusy(false)
     }
   }
 
@@ -250,6 +413,7 @@ export default function AdminSettingsPage() {
 
   useEffect(() => {
     void fetchAcademicPeriods()
+    void fetchPlatformSettings()
   }, [])
 
   useEffect(() => {
@@ -264,7 +428,43 @@ export default function AdminSettingsPage() {
     setSelectedAcademicForm(selected ? periodToForm(selected) : null)
   }, [academicPeriods, selectedAcademicPeriodId])
 
-  function handleSave() {
+  async function handleSave() {
+    await runSettingsAction(
+      {
+        action: "save_settings",
+        institutionName: platformName,
+        institutionLogoUrl,
+        institutionFaviconUrl,
+        platformDescription: platformDesc,
+        supportEmail,
+        defaultLocale: language,
+        defaultTimezone: timezone,
+        themeMode,
+        featureMessagingEnabled,
+        featureMeetingsEnabled,
+        featureAnnouncementsEnabled,
+        featureAiExplanationsEnabled,
+        smtpProvider,
+        smtpHost,
+        smtpPort: Number(smtpPort),
+        smtpUser,
+        smtpApiKey,
+        aiProvider,
+        aiModel,
+        aiTemperature: Number(aiTemperature),
+        aiRateLimitPerMin: Number(aiRateLimitPerMin),
+        aiApiKey,
+        ssoEnabled,
+        lmsEnabled,
+        calendarEnabled,
+        sessionTimeoutMinutes: Number(sessionTimeout),
+        passwordMinLength: Number(passwordMinLength),
+        twoFactorRequiredForAdmin: twoFactorRequired,
+        ipAllowList: ipAllowList,
+        auditLoggingEnabled: auditLogging,
+      },
+      "Platform settings saved."
+    )
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -284,7 +484,7 @@ export default function AdminSettingsPage() {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline">Discard changes</Button>
-            <Button onClick={handleSave} disabled={saved}>
+            <Button onClick={() => void handleSave()} disabled={saved || settingsBusy}>
               {saved ? (
                 <>
                   <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -293,12 +493,22 @@ export default function AdminSettingsPage() {
               ) : (
                 <>
                   <Save className="mr-2 h-4 w-4" />
-                  Save all settings
+                  {settingsBusy ? "Saving..." : "Save all settings"}
                 </>
               )}
             </Button>
           </div>
         </div>
+        {settingsError && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {settingsError}
+          </div>
+        )}
+        {settingsNotice && (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700">
+            {settingsNotice}
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -383,6 +593,37 @@ export default function AdminSettingsPage() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <div className="space-y-2">
+                        <Label>Theme mode</Label>
+                        <Select value={themeMode} onValueChange={setThemeMode}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="dark">Dark</SelectItem>
+                            <SelectItem value="light">Light</SelectItem>
+                            <SelectItem value="system">System</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="institution-logo">Institution logo URL</Label>
+                        <Input
+                          id="institution-logo"
+                          value={institutionLogoUrl}
+                          onChange={(e) => setInstitutionLogoUrl(e.target.value)}
+                          placeholder="https://..."
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="institution-favicon">Favicon URL</Label>
+                        <Input
+                          id="institution-favicon"
+                          value={institutionFaviconUrl}
+                          onChange={(e) => setInstitutionFaviconUrl(e.target.value)}
+                          placeholder="https://..."
+                        />
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="platform-desc">Platform description</Label>
@@ -401,12 +642,36 @@ export default function AdminSettingsPage() {
                     <CardTitle>System Controls</CardTitle>
                     <CardDescription>Global operational toggles</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-1">
+                <CardContent className="space-y-1">
                     {[
-                      { icon: Bell, title: "System alerts", desc: "Admin notifications for degraded services and security events." },
-                      { icon: Users, title: "User approval control", desc: "Require admin approval for high-level role changes." },
-                      { icon: Server, title: "System monitoring", desc: "Continuous health and uptime monitoring." },
-                      { icon: Mail, title: "Email summaries", desc: "Scheduled digest reports to admins." },
+                      {
+                        icon: Bell,
+                        title: "Messaging module",
+                        desc: "Enable or disable in-app messaging globally.",
+                        checked: featureMessagingEnabled,
+                        onToggle: setFeatureMessagingEnabled,
+                      },
+                      {
+                        icon: Calendar,
+                        title: "Meetings module",
+                        desc: "Enable or disable meetings and scheduling flows.",
+                        checked: featureMeetingsEnabled,
+                        onToggle: setFeatureMeetingsEnabled,
+                      },
+                      {
+                        icon: Megaphone,
+                        title: "Announcements module",
+                        desc: "Enable or disable announcement publishing and banners.",
+                        checked: featureAnnouncementsEnabled,
+                        onToggle: setFeatureAnnouncementsEnabled,
+                      },
+                      {
+                        icon: Sparkles,
+                        title: "AI explanations",
+                        desc: "Show or hide AI-generated matching explanations.",
+                        checked: featureAiExplanationsEnabled,
+                        onToggle: setFeatureAiExplanationsEnabled,
+                      },
                     ].map((row, idx, arr) => (
                       <div key={row.title}>
                         <div className="flex items-center justify-between gap-4 py-3">
@@ -419,7 +684,7 @@ export default function AdminSettingsPage() {
                               <p className="text-sm text-muted-foreground">{row.desc}</p>
                             </div>
                           </div>
-                          <Switch defaultChecked />
+                          <Switch checked={row.checked} onCheckedChange={row.onToggle} />
                         </div>
                         {idx < arr.length - 1 && <Separator />}
                       </div>
@@ -1292,6 +1557,94 @@ export default function AdminSettingsPage() {
                         Add endpoint
                       </Button>
                     </IntegrationRow>
+                    <Separator />
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>SMTP host</Label>
+                        <Input
+                          value={smtpHost}
+                          onChange={(e) => setSmtpHost(e.target.value)}
+                          placeholder="smtp.example.edu"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>SMTP port</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="65535"
+                          value={smtpPort}
+                          onChange={(e) => setSmtpPort(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>SMTP user</Label>
+                        <Input value={smtpUser} onChange={(e) => setSmtpUser(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>SMTP API key</Label>
+                        <Input
+                          value={smtpApiKey}
+                          onChange={(e) => setSmtpApiKey(e.target.value)}
+                          placeholder={smtpApiKeyMasked || "Set new key"}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>AI model</Label>
+                        <Input value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>AI temperature</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="2"
+                          step="0.1"
+                          value={aiTemperature}
+                          onChange={(e) => setAiTemperature(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>AI rate limit (rpm)</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={aiRateLimitPerMin}
+                          onChange={(e) => setAiRateLimitPerMin(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>AI API key</Label>
+                        <Input
+                          value={aiApiKey}
+                          onChange={(e) => setAiApiKey(e.target.value)}
+                          placeholder={aiApiKeyMasked || "Set new key"}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div>
+                          <p className="text-sm font-medium">SSO enabled</p>
+                          <p className="text-xs text-muted-foreground">SAML/OAuth provider</p>
+                        </div>
+                        <Switch checked={ssoEnabled} onCheckedChange={setSsoEnabled} />
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div>
+                          <p className="text-sm font-medium">LMS sync</p>
+                          <p className="text-xs text-muted-foreground">Auto-sync student lists</p>
+                        </div>
+                        <Switch checked={lmsEnabled} onCheckedChange={setLmsEnabled} />
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div>
+                          <p className="text-sm font-medium">Calendar sync</p>
+                          <p className="text-xs text-muted-foreground">Google/Outlook sync</p>
+                        </div>
+                        <Switch checked={calendarEnabled} onCheckedChange={setCalendarEnabled} />
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
 
@@ -1303,32 +1656,86 @@ export default function AdminSettingsPage() {
                     </CardTitle>
                     <CardDescription>Issue and manage API keys for external systems</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-3">
-                    {[
-                      { name: "Reporting service", masked: "sk_live_***_reporting", created: "Dec 01, 2024" },
-                      { name: "Analytics pipeline", masked: "sk_live_***_analytics", created: "Nov 15, 2024" },
-                    ].map((k) => (
-                      <div key={k.name} className="flex items-center justify-between rounded-xl border p-3">
+                <CardContent className="space-y-3">
+                    {apiKeys.map((k) => (
+                      <div key={k.id} className="flex items-center justify-between rounded-xl border p-3">
                         <div>
-                          <p className="text-sm font-medium">{k.name}</p>
+                          <p className="text-sm font-medium">
+                            {k.name} <span className="text-xs text-muted-foreground">({k.service})</span>
+                          </p>
                           <p className="font-mono text-xs text-muted-foreground">
-                            {k.masked} - issued {k.created}
+                            {k.keyPrefix}*** - issued {new Date(k.createdAt).toLocaleDateString()}
+                            {k.lastUsedAt ? ` - last used ${new Date(k.lastUsedAt).toLocaleDateString()}` : ""}
+                            {k.revokedAt ? " - revoked" : ""}
                           </p>
                         </div>
                         <div className="flex gap-2">
-                          <Button variant="ghost" size="sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={settingsBusy}
+                            onClick={() =>
+                              void runSettingsAction(
+                                { action: "rotate_api_key", keyId: k.id },
+                                "API key rotated."
+                              )
+                            }
+                          >
                             Rotate
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-destructive">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            disabled={settingsBusy || Boolean(k.revokedAt)}
+                            onClick={() =>
+                              void runSettingsAction(
+                                { action: "revoke_api_key", keyId: k.id },
+                                "API key revoked."
+                              )
+                            }
+                          >
                             Revoke
                           </Button>
                         </div>
                       </div>
                     ))}
-                    <Button variant="outline" className="w-full bg-transparent">
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <Input
+                        value={newApiKeyService}
+                        onChange={(e) => setNewApiKeyService(e.target.value)}
+                        placeholder="Service"
+                      />
+                      <Input
+                        value={newApiKeyName}
+                        onChange={(e) => setNewApiKeyName(e.target.value)}
+                        placeholder="Key display name"
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="w-full bg-transparent"
+                      disabled={settingsBusy}
+                      onClick={() =>
+                        void runSettingsAction(
+                          {
+                            action: "generate_api_key",
+                            service: newApiKeyService,
+                            name: newApiKeyName,
+                          },
+                          "API key generated."
+                        )
+                      }
+                    >
                       <Key className="mr-2 h-4 w-4" />
                       Generate new API key
                     </Button>
+                    {newlyGeneratedSecret && (
+                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs">
+                        <p className="font-medium text-emerald-700">Copy now (shown once)</p>
+                        <p className="mt-1 font-mono text-emerald-700">{newlyGeneratedSecret}</p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1367,7 +1774,18 @@ export default function AdminSettingsPage() {
                 <SettingChip icon={Eye} label="Visibility" value="Role-based" />
                 <SettingChip icon={Lock} label="Access" value="Protected" />
                 <SettingChip icon={Database} label="Backups" value="Configured" />
-                <SettingChip icon={Plug} label="Integrations" value="3 active" />
+                <SettingChip
+                  icon={Plug}
+                  label="Integrations"
+                  value={`${[
+                    featureMessagingEnabled,
+                    featureMeetingsEnabled,
+                    featureAnnouncementsEnabled,
+                    ssoEnabled,
+                    lmsEnabled,
+                    calendarEnabled,
+                  ].filter(Boolean).length} active`}
+                />
               </CardContent>
             </Card>
 
