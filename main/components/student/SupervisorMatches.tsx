@@ -1,6 +1,6 @@
 "use client"
 
-import { Sparkles, Star, Send, ChevronRight } from "lucide-react"
+import { Sparkles, Star, Send, ChevronRight, Brain, Settings2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -88,6 +88,17 @@ export function SupervisorMatches({ matches, onSendRequest }: SupervisorMatchesP
                         {match.matchScore}%
                       </span>
                       <span className="text-sm text-muted-foreground">match</span>
+                      {match.source === "gemini" ? (
+                        <Badge variant="secondary" className="gap-1 text-[10px]">
+                          <Brain className="h-3 w-3" />
+                          Gemini
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="gap-1 text-[10px]">
+                          <Settings2 className="h-3 w-3" />
+                          Rule-based
+                        </Badge>
+                      )}
                     </div>
                     <div className="mt-1 w-32">
                       <Progress 

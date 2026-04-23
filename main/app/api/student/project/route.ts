@@ -6,6 +6,28 @@ import {
   getActiveAcademicPeriod,
 } from "@/lib/academic-periods"
 
+function normalizeKeywordsInput(input: unknown): string | null {
+  const rawValues: string[] = Array.isArray(input)
+    ? input.filter((item): item is string => typeof item === "string")
+    : typeof input === "string"
+      ? input.split(/[\n,;/]/)
+      : []
+
+  const deduped = new Map<string, string>()
+
+  rawValues.forEach((value) => {
+    const cleaned = value.trim().replace(/\s+/g, " ")
+    if (!cleaned) return
+    const key = cleaned.toLowerCase()
+    if (!deduped.has(key)) {
+      deduped.set(key, cleaned)
+    }
+  })
+
+  const keywords = Array.from(deduped.values())
+  return keywords.length > 0 ? keywords.join(", ") : null
+}
+
 export async function GET(req: Request) {
   try {
     const payload = await verifyTokenFromHeader(req.headers.get("authorization"), { path: new URL(req.url).pathname, method: req.method })
@@ -92,8 +114,7 @@ export async function PUT(req: Request) {
     const title = typeof body.title === "string" ? body.title.trim() : null
     const description =
       typeof body.description === "string" ? body.description.trim() : null
-    const keywords =
-      typeof body.keywords === "string" ? body.keywords.trim() : null
+    const keywords = normalizeKeywordsInput(body.keywords)
     const status = typeof body.status === "string" ? body.status.trim() : "draft"
 
     await autoArchiveCompletedAcademicPeriods(prisma)
@@ -129,16 +150,6 @@ export async function PUT(req: Request) {
 
     const activePeriod = await getActiveAcademicPeriod(prisma)
 
-    if (!existingProject && !activePeriod) {
-      return NextResponse.json(
-        {
-          error:
-            "No active academic period is configured. Ask an admin to activate one before creating project data.",
-        },
-        { status: 400 }
-      )
-    }
-
     const effectivePeriod =
       existingProject?.academicPeriod || activePeriod || null
 
@@ -172,16 +183,6 @@ export async function PUT(req: Request) {
 
     const academicPeriodId =
       existingProject?.academicPeriodId || activePeriod?.id || null
-
-    if (!academicPeriodId) {
-      return NextResponse.json(
-        {
-          error:
-            "No academic period could be assigned. Ask an admin to set an active period.",
-        },
-        { status: 400 }
-      )
-    }
 
     const project = await prisma.project.upsert({
       where: { studentId: payload.sub },

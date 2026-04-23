@@ -126,17 +126,9 @@ export default function StudentProfilePage() {
         const dbProfile: StudentProfileApi = data.profile
         setProfile(dbProfile)
 
-        if (dbProfile?.fullName) {
-          setName(dbProfile.fullName)
-        }
-
-        if (dbProfile?.skills) {
-          setSkills(splitCsv(dbProfile.skills))
-        }
-
-        if (dbProfile?.interests) {
-          setInterests(splitCsv(dbProfile.interests))
-        }
+        setName(dbProfile?.fullName || currentStudent.name)
+        setSkills(splitCsv(dbProfile?.skills || null))
+        setInterests(splitCsv(dbProfile?.interests || null))
       } catch (err) {
         console.error(err)
         setError("Could not load your profile from the database.")
@@ -364,6 +356,40 @@ export default function StudentProfilePage() {
                       {bio.length} characters · aim for at least 80 for best matches.
                     </p>
                   </div>
+
+                  {profile && (
+                    <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+                      <p className="text-sm font-medium">Onboarding summary</p>
+
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Project idea
+                        </p>
+                        <p className="text-sm">
+                          {profile.onboardingProjectIdea || "No project idea saved yet."}
+                        </p>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Existing strengths
+                          </p>
+                          <p className="text-sm">
+                            {profile.onboardingStrengths || "No strengths captured yet."}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Learning goals
+                          </p>
+                          <p className="text-sm">
+                            {profile.onboardingWeaknesses || "No learning goals captured yet."}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -813,7 +839,7 @@ export default function StudentProfilePage() {
                 Your profile looks great. Find a supervisor who matches your research interests.
               </p>
               <Button className="w-full" asChild>
-                <a href="/dashboard/student/matching">Find a supervisor</a>
+                <a href="/dashboard/student/find-supervisor">Find a supervisor</a>
               </Button>
             </CardContent>
           </Card>

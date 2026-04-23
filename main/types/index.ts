@@ -88,6 +88,7 @@ export interface SupervisorMatch {
   matchScore: number
   matchReasons: string[]
   similarProjects: string[]
+  source?: "rule_based" | "gemini"
 }
 
 // System health (for admin)

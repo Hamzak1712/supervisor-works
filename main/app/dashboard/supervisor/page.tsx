@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from "react"
 import {
   Users,
   ClipboardList,
-  CheckCircle2,
   Clock3,
   TrendingUp,
   MessageSquare,
@@ -119,6 +118,44 @@ type RequestOverview = {
   matchScore: number
 }
 
+type ApiRecommendedMatch = {
+  student: {
+    id: string
+    fullName: string
+    email: string
+    projectTitle: string
+    projectStatus: string | null
+    requestStatus: string | null
+  }
+  matchScore: number
+  matchReasons: string[]
+  source: "rule_based" | "gemini"
+}
+
+type RecommendedStudentsResponse = {
+  matches?: ApiRecommendedMatch[]
+  settings?: {
+    aiExplanationEnabled?: boolean
+  }
+  stats?: {
+    candidateCount?: number
+    hiddenByThreshold?: number
+  }
+  error?: string
+}
+
+type RecommendedStudentOverview = {
+  id: string
+  name: string
+  email: string
+  projectTitle: string
+  projectStatus: string | null
+  requestStatus: string | null
+  matchScore: number
+  matchReasons: string[]
+  source: "rule_based" | "gemini"
+}
+
 const fallbackShellUser: User = {
   id: "supervisor",
   email: "supervisor@example.com",
@@ -180,6 +217,14 @@ export default function SupervisorDashboardPage() {
   const [shellUser, setShellUser] = useState<User>(fallbackShellUser)
   const [students, setStudents] = useState<StudentOverview[]>([])
   const [requests, setRequests] = useState<RequestOverview[]>([])
+  const [recommendedStudents, setRecommendedStudents] = useState<
+    RecommendedStudentOverview[]
+  >([])
+  const [recommendationStats, setRecommendationStats] = useState({
+    candidateCount: 0,
+    hiddenByThreshold: 0,
+  })
+  const [recommendationUsesAi, setRecommendationUsesAi] = useState(false)
   const [maxStudents, setMaxStudents] = useState(5)
   const [expertise, setExpertise] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -191,7 +236,7 @@ export default function SupervisorDashboardPage() {
         setError("")
         const token = localStorage.getItem("token")
 
-        const [meRes, studentsRes, requestsRes] = await Promise.all([
+        const [meRes, studentsRes, requestsRes, recommendedRes] = await Promise.all([
           fetch("/api/auth/me", {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -207,11 +252,18 @@ export default function SupervisorDashboardPage() {
               Authorization: `Bearer ${token}`,
             },
           }),
+          fetch("/api/supervisor/recommended-students", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
         ])
 
         const meData = await meRes.json()
         const studentsData = await studentsRes.json()
         const requestsData = await requestsRes.json()
+        const recommendedData: RecommendedStudentsResponse =
+          await recommendedRes.json()
 
         if (!meRes.ok) {
           throw new Error(meData?.error || "Failed to load supervisor profile")
@@ -228,6 +280,12 @@ export default function SupervisorDashboardPage() {
 
         if (!requestsRes.ok) {
           throw new Error(requestsData?.error || "Failed to load requests")
+        }
+
+        if (!recommendedRes.ok && recommendedRes.status !== 400) {
+          throw new Error(
+            recommendedData?.error || "Failed to load recommended students"
+          )
         }
 
         const meUser = meData.user
@@ -302,6 +360,36 @@ export default function SupervisorDashboardPage() {
           }
         })
         setRequests(normalizedRequests)
+
+        if (recommendedRes.ok) {
+          const apiRecommended = recommendedData.matches || []
+          const normalizedRecommended = apiRecommended.map((entry) => ({
+            id: entry.student.id,
+            name: entry.student.fullName || "Unnamed Student",
+            email: entry.student.email,
+            projectTitle: entry.student.projectTitle || "Untitled Project",
+            projectStatus: entry.student.projectStatus,
+            requestStatus: entry.student.requestStatus,
+            matchScore: entry.matchScore,
+            matchReasons: entry.matchReasons || [],
+            source: entry.source,
+          }))
+
+          setRecommendedStudents(normalizedRecommended)
+          setRecommendationStats({
+            candidateCount:
+              recommendedData.stats?.candidateCount ?? normalizedRecommended.length,
+            hiddenByThreshold: recommendedData.stats?.hiddenByThreshold ?? 0,
+          })
+          setRecommendationUsesAi(Boolean(recommendedData.settings?.aiExplanationEnabled))
+        } else {
+          setRecommendedStudents([])
+          setRecommendationStats({
+            candidateCount: 0,
+            hiddenByThreshold: 0,
+          })
+          setRecommendationUsesAi(false)
+        }
       } catch (err: any) {
         console.error(err)
         setError(err?.message || "Could not load dashboard.")
@@ -387,6 +475,8 @@ export default function SupervisorDashboardPage() {
   const topRequests = [...pendingRequests]
     .sort((a, b) => b.matchScore - a.matchScore)
     .slice(0, 3)
+
+  const topRecommendedStudents = [...recommendedStudents].slice(0, 4)
 
   const topStudents = [...students]
     .sort((a, b) => b.progress - a.progress)
@@ -681,6 +771,101 @@ export default function SupervisorDashboardPage() {
           </div>
 
           <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    Recommended Students
+                  </CardTitle>
+                  {topRecommendedStudents.length > 0 && (
+                    <Badge variant="secondary" className="bg-primary/10 text-primary">
+                      {topRecommendedStudents.length} shown
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Ranked using student project signals and your supervisor onboarding
+                  profile.
+                </p>
+                {topRecommendedStudents.length === 0 ? (
+                  <div className="rounded-lg border border-dashed p-6 text-center">
+                    <Users className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+                    <p className="text-sm font-medium">No recommendations yet</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Complete onboarding and wait for student profiles to populate.
+                    </p>
+                  </div>
+                ) : (
+                  topRecommendedStudents.map((student) => (
+                    <div
+                      key={student.id}
+                      className="space-y-2 rounded-xl border p-3 transition-colors hover:border-primary/40"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold leading-tight">
+                            {student.name}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {student.projectTitle}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-base font-bold tabular-nums">
+                            {student.matchScore}%
+                          </p>
+                          <Badge variant="outline" className="text-[10px]">
+                            {student.source === "gemini" ? "AI" : "Rule"}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        {student.matchReasons.slice(0, 2).map((reason) => (
+                          <p
+                            key={reason}
+                            className="text-[11px] leading-relaxed text-muted-foreground"
+                          >
+                            - {reason}
+                          </p>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" asChild>
+                          <Link
+                            href={`/dashboard/messages?userId=${student.id}&name=${encodeURIComponent(
+                              student.name
+                            )}`}
+                          >
+                            <MessageSquare className="mr-2 h-3.5 w-3.5" />
+                            Message
+                          </Link>
+                        </Button>
+                        {student.requestStatus === "pending" && (
+                          <Badge
+                            variant="outline"
+                            className="border-warning/30 text-[10px] text-warning"
+                          >
+                            Pending request
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+                <p className="text-[11px] text-muted-foreground">
+                  {recommendationStats.candidateCount} student candidates evaluated
+                  {recommendationStats.hiddenByThreshold > 0 &&
+                    ` · ${recommendationStats.hiddenByThreshold} hidden by threshold`}
+                  {recommendationUsesAi && " · AI explanations enabled"}
+                </p>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">

@@ -84,7 +84,7 @@ export async function POST(req: Request) {
 
     const needsStudentOnboarding =
       user.role === "STUDENT" &&
-      user.studentProfile?.onboardingCompleted === false
+      user.studentProfile?.onboardingCompleted !== true
 
     const needsSupervisorOnboarding =
       user.role === "SUPERVISOR" &&

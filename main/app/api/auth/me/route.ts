@@ -46,7 +46,7 @@ export async function GET(req: Request) {
 
     const needsOnboarding =
       (user.role === "STUDENT" &&
-        user.studentProfile?.onboardingCompleted === false) ||
+        user.studentProfile?.onboardingCompleted !== true) ||
       (user.role === "SUPERVISOR" &&
         user.supervisorProfile?.onboardingCompleted !== true)
 

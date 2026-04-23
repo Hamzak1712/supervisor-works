@@ -10,6 +10,20 @@ interface ProjectCardProps {
   project: Project | null
 }
 
+function uniqueNormalized(values: string[]) {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  values.forEach((value) => {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    result.push(value.trim())
+  })
+
+  return result
+}
+
 const statusConfig = {
   draft: { label: "Draft", variant: "secondary" as const, icon: FileText },
   pending_supervisor: { label: "Pending Supervisor", variant: "outline" as const, icon: Clock },
@@ -47,6 +61,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
   }
 
   const status = statusConfig[project.status]
+  const uniqueKeywords = uniqueNormalized(project.keywords)
+  const uniqueExpertiseTags = uniqueNormalized(project.expertiseTags)
 
   return (
     <Card>
@@ -78,8 +94,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
             <span>Keywords</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {project.keywords.map((keyword) => (
-              <Badge key={keyword} variant="secondary">
+            {uniqueKeywords.map((keyword) => (
+              <Badge key={keyword.toLowerCase()} variant="secondary">
                 {keyword}
               </Badge>
             ))}
@@ -89,8 +105,12 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Expertise Tags</p>
           <div className="flex flex-wrap gap-2">
-            {project.expertiseTags.map((tag) => (
-              <Badge key={tag} variant="outline" className="border-primary/30 text-primary">
+            {uniqueExpertiseTags.map((tag) => (
+              <Badge
+                key={tag.toLowerCase()}
+                variant="outline"
+                className="border-primary/30 text-primary"
+              >
                 {tag}
               </Badge>
             ))}

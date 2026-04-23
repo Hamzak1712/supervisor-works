@@ -27,6 +27,222 @@ const ids = {
   studentPending: "user_student_pending",
 }
 
+const extraSupervisorSeeds = [
+  {
+    id: "user_supervisor_extra_01",
+    email: "elena.rossi@supervisor-demo.local",
+    fullName: "Dr Elena Rossi",
+    expertise:
+      "natural language processing, large language models, information retrieval, applied ai",
+    maxCapacity: 6,
+    preferredProjectType: "research",
+  },
+  {
+    id: "user_supervisor_extra_02",
+    email: "omar.haddad@supervisor-demo.local",
+    fullName: "Dr Omar Haddad",
+    expertise:
+      "cloud computing, devops, distributed systems, site reliability engineering",
+    maxCapacity: 5,
+    preferredProjectType: "practical",
+  },
+  {
+    id: "user_supervisor_extra_03",
+    email: "priya.nair@supervisor-demo.local",
+    fullName: "Dr Priya Nair",
+    expertise:
+      "data science, machine learning, analytics engineering, model evaluation",
+    maxCapacity: 6,
+    preferredProjectType: "hybrid",
+  },
+  {
+    id: "user_supervisor_extra_04",
+    email: "james.okafor@supervisor-demo.local",
+    fullName: "Dr James Okafor",
+    expertise:
+      "cybersecurity, threat intelligence, secure software, incident response",
+    maxCapacity: 4,
+    preferredProjectType: "practical",
+  },
+  {
+    id: "user_supervisor_extra_05",
+    email: "lina.meyer@supervisor-demo.local",
+    fullName: "Dr Lina Meyer",
+    expertise:
+      "human computer interaction, accessibility, ux research, interaction design",
+    maxCapacity: 5,
+    preferredProjectType: "research",
+  },
+  {
+    id: "user_supervisor_extra_06",
+    email: "marcus.bell@supervisor-demo.local",
+    fullName: "Dr Marcus Bell",
+    expertise:
+      "software engineering, testing automation, quality assurance, architecture",
+    maxCapacity: 5,
+    preferredProjectType: "practical",
+  },
+  {
+    id: "user_supervisor_extra_07",
+    email: "nadia.khan@supervisor-demo.local",
+    fullName: "Dr Nadia Khan",
+    expertise:
+      "computer vision, deep learning, edge ai, visual analytics",
+    maxCapacity: 4,
+    preferredProjectType: "hybrid",
+  },
+  {
+    id: "user_supervisor_extra_08",
+    email: "victor.silva@supervisor-demo.local",
+    fullName: "Dr Victor Silva",
+    expertise:
+      "iot systems, embedded software, sensor networks, real-time systems",
+    maxCapacity: 4,
+    preferredProjectType: "practical",
+  },
+  {
+    id: "user_supervisor_extra_09",
+    email: "hannah.choi@supervisor-demo.local",
+    fullName: "Dr Hannah Choi",
+    expertise:
+      "business intelligence, decision support systems, data visualization, analytics",
+    maxCapacity: 6,
+    preferredProjectType: "hybrid",
+  },
+  {
+    id: "user_supervisor_extra_10",
+    email: "yusuf.ali@supervisor-demo.local",
+    fullName: "Dr Yusuf Ali",
+    expertise:
+      "mobile development, cross-platform apps, product engineering, api integration",
+    maxCapacity: 5,
+    preferredProjectType: "practical",
+  },
+] as const
+
+const extraStudentSeeds = [
+  {
+    id: "user_student_extra_01",
+    email: "sana.imran@student-demo.local",
+    fullName: "Sana Imran",
+    skills: "python, tensorflow, pandas",
+    interests: "nlp, applied ai, recommendation systems",
+    projectTitle: "AI Study Planner Assistant",
+    description:
+      "Build an AI assistant that helps students plan weekly study goals and adapt deadlines from progress signals.",
+    keywords: "ai, study planner, recommendation, nlp",
+    status: "pending_supervisor",
+  },
+  {
+    id: "user_student_extra_02",
+    email: "liam.evans@student-demo.local",
+    fullName: "Liam Evans",
+    skills: "react, next.js, node.js",
+    interests: "web engineering, usability, frontend systems",
+    projectTitle: "Accessible Coursework Submission Portal",
+    description:
+      "Create an accessibility-first coursework portal with adaptive interfaces and submission analytics.",
+    keywords: "accessibility, web, ux, analytics",
+    status: "draft",
+  },
+  {
+    id: "user_student_extra_03",
+    email: "noor.hassan@student-demo.local",
+    fullName: "Noor Hassan",
+    skills: "python, wireshark, linux",
+    interests: "cybersecurity, threat detection, security monitoring",
+    projectTitle: "University Network Threat Dashboard",
+    description:
+      "Design a dashboard that correlates security logs and flags anomalous network behavior.",
+    keywords: "cybersecurity, soc, dashboard, anomaly detection",
+    status: "pending_supervisor",
+  },
+  {
+    id: "user_student_extra_04",
+    email: "emily.turner@student-demo.local",
+    fullName: "Emily Turner",
+    skills: "sql, power bi, python",
+    interests: "business intelligence, retention analytics, data storytelling",
+    projectTitle: "Retention Analytics for Student Support",
+    description:
+      "Use predictive analytics to identify students at risk and visualize interventions for advisors.",
+    keywords: "analytics, retention, predictive modelling, visualization",
+    status: "active",
+  },
+  {
+    id: "user_student_extra_05",
+    email: "aarav.shah@student-demo.local",
+    fullName: "Aarav Shah",
+    skills: "flutter, firebase, dart",
+    interests: "mobile apps, productivity tools, cloud sync",
+    projectTitle: "Cross-Platform Milestone Tracker",
+    description:
+      "Develop a mobile app for milestone planning with reminders, supervisor comments, and sync support.",
+    keywords: "mobile, flutter, milestones, cloud",
+    status: "pending_supervisor",
+  },
+  {
+    id: "user_student_extra_06",
+    email: "maya.green@student-demo.local",
+    fullName: "Maya Green",
+    skills: "opencv, pytorch, python",
+    interests: "computer vision, edge ai, embedded deployment",
+    projectTitle: "Edge Vision Quality Inspection",
+    description:
+      "Prototype an edge-vision pipeline for quality inspection with low-latency inference.",
+    keywords: "computer vision, edge ai, inference, quality inspection",
+    status: "draft",
+  },
+  {
+    id: "user_student_extra_07",
+    email: "daniel.owen@student-demo.local",
+    fullName: "Daniel Owen",
+    skills: "java, spring boot, postgresql",
+    interests: "software architecture, backend systems, scalability",
+    projectTitle: "Scalable Supervisor Request Service",
+    description:
+      "Implement a scalable backend service for supervisor request workflows with auditability.",
+    keywords: "backend, architecture, scalability, workflow",
+    status: "pending_supervisor",
+  },
+  {
+    id: "user_student_extra_08",
+    email: "zara.iqbal@student-demo.local",
+    fullName: "Zara Iqbal",
+    skills: "figma, react, typescript",
+    interests: "hci, accessibility, user research",
+    projectTitle: "Adaptive UI for Neurodiverse Learners",
+    description:
+      "Investigate adaptive UI patterns that improve focus and comprehension for neurodiverse students.",
+    keywords: "hci, adaptive ui, accessibility, user research",
+    status: "draft",
+  },
+  {
+    id: "user_student_extra_09",
+    email: "ethan.clark@student-demo.local",
+    fullName: "Ethan Clark",
+    skills: "c++, arduino, python",
+    interests: "iot, embedded systems, sensor platforms",
+    projectTitle: "Smart Lab Environment Monitoring",
+    description:
+      "Build an IoT monitoring system for lab conditions with automated alerts and historical analytics.",
+    keywords: "iot, sensors, embedded, monitoring",
+    status: "active",
+  },
+  {
+    id: "user_student_extra_10",
+    email: "amina.yusuf@student-demo.local",
+    fullName: "Amina Yusuf",
+    skills: "python, scikit-learn, sql",
+    interests: "machine learning, recommendation systems, educational data",
+    projectTitle: "Supervisor Match Explainability Toolkit",
+    description:
+      "Create tools to explain supervisor recommendation scores with transparent feature-level evidence.",
+    keywords: "machine learning, explainability, matching, education analytics",
+    status: "pending_supervisor",
+  },
+] as const
+
 function addDays(date: Date, days: number) {
   const next = new Date(date)
   next.setDate(next.getDate() + days)
@@ -108,6 +324,14 @@ async function seedUsers() {
         status: AccountStatus.PENDING,
         sessionVersion: 0,
       },
+      ...extraSupervisorSeeds.map((supervisor) => ({
+        id: supervisor.id,
+        email: supervisor.email,
+        passwordHash: demoPasswordHash,
+        role: Role.SUPERVISOR,
+        status: AccountStatus.ACTIVE,
+        sessionVersion: 0,
+      })),
 
       {
         id: ids.studentAhmed,
@@ -173,6 +397,14 @@ async function seedUsers() {
         status: AccountStatus.PENDING,
         sessionVersion: 0,
       },
+      ...extraStudentSeeds.map((student) => ({
+        id: student.id,
+        email: student.email,
+        passwordHash: demoPasswordHash,
+        role: Role.STUDENT,
+        status: AccountStatus.ACTIVE,
+        sessionVersion: 0,
+      })),
     ],
   })
 }
@@ -186,6 +418,7 @@ async function seedProfiles() {
         expertise:
           "machine learning, healthcare ai, natural language processing, predictive analytics",
         maxCapacity: 5,
+        onboardingCompleted: true,
       },
       {
         userId: ids.supervisorDavid,
@@ -193,6 +426,7 @@ async function seedProfiles() {
         expertise:
           "data engineering, business analytics, data visualization, cloud platforms",
         maxCapacity: 4,
+        onboardingCompleted: true,
       },
       {
         userId: ids.supervisorFatima,
@@ -200,6 +434,7 @@ async function seedProfiles() {
         expertise:
           "cybersecurity, digital forensics, secure systems, privacy engineering",
         maxCapacity: 3,
+        onboardingCompleted: true,
       },
       {
         userId: ids.supervisorManaged,
@@ -207,13 +442,44 @@ async function seedProfiles() {
         expertise:
           "software architecture, distributed systems, backend engineering",
         maxCapacity: 2,
+        onboardingCompleted: true,
       },
       {
         userId: ids.supervisorPending,
         fullName: "Dr Pending Invite",
         expertise: "human computer interaction, ux research",
         maxCapacity: 3,
+        onboardingCompleted: false,
       },
+      ...extraSupervisorSeeds.map((supervisor) => ({
+        userId: supervisor.id,
+        fullName: supervisor.fullName,
+        expertise: supervisor.expertise,
+        maxCapacity: supervisor.maxCapacity,
+        onboardingCompleted: true,
+        onboardingSignals: {
+          expertiseDomains: supervisor.expertise.split(",").map((item) => item.trim()),
+          preferredProjectType: supervisor.preferredProjectType,
+          coreTechnologies: supervisor.expertise
+            .split(",")
+            .map((item) => item.trim())
+            .slice(0, 4),
+          studentSupportStrengths: [
+            "clear weekly feedback",
+            "scope definition",
+            "evaluation guidance",
+          ],
+          pastProjectThemes: supervisor.expertise
+            .split(",")
+            .map((item) => item.trim())
+            .slice(0, 3),
+          profileKeywords: supervisor.expertise
+            .split(",")
+            .map((item) => item.trim())
+            .slice(0, 6),
+          summary: `${supervisor.fullName} supports ${supervisor.preferredProjectType} projects in ${supervisor.expertise}.`,
+        },
+      })),
     ],
   })
 
@@ -269,6 +535,16 @@ async function seedProfiles() {
         skills: "",
         interests: "",
       },
+      ...extraStudentSeeds.map((student) => ({
+        userId: student.id,
+        fullName: student.fullName,
+        skills: student.skills,
+        interests: student.interests,
+        onboardingCompleted: true,
+        onboardingProjectIdea: student.projectTitle,
+        onboardingStrengths: student.skills,
+        onboardingWeaknesses: student.interests,
+      })),
     ],
   })
 }
@@ -341,6 +617,15 @@ async function seedProjectsAndMilestones() {
         status: "draft",
         createdAt: addDays(BASE_DATE, -15),
       },
+      ...extraStudentSeeds.map((student, index) => ({
+        id: `project_student_extra_${String(index + 1).padStart(2, "0")}`,
+        studentId: student.id,
+        title: student.projectTitle,
+        description: student.description,
+        keywords: student.keywords,
+        status: student.status,
+        createdAt: addDays(BASE_DATE, -45 + index * 2),
+      })),
     ],
   })
 
@@ -804,6 +1089,14 @@ async function main() {
   console.log("  - sarah.wilson@supervisor-demo.local")
   console.log("  - david.chen@supervisor-demo.local")
   console.log("  - fatima.noor@supervisor-demo.local")
+  console.log("  - elena.rossi@supervisor-demo.local")
+  console.log("  - omar.haddad@supervisor-demo.local")
+  console.log("  - sana.imran@student-demo.local")
+  console.log("  - liam.evans@student-demo.local")
+  console.log("")
+  console.log("Extra demo cohort added:")
+  console.log("  - 10 additional supervisors (ACTIVE)")
+  console.log("  - 10 additional students (ACTIVE)")
   console.log("")
   console.log("Status demo accounts:")
   console.log("  - suspended.student@student-demo.local (SUSPENDED)")

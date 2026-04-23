@@ -20,9 +20,9 @@ import type { UserRole } from "@/types"
 
 // Demo credentials for each role
 const demoCredentials: Record<UserRole, { email: string; password: string }> = {
-  student: { email: "john.smith@university.ac.uk", password: "demo123" },
-  supervisor: { email: "dr.williams@university.ac.uk", password: "demo123" },
-  admin: { email: "admin@university.ac.uk", password: "demo123" },
+  student: { email: "ahmed.khan@student-demo.local", password: "Demo123!" },
+  supervisor: { email: "sarah.wilson@supervisor-demo.local", password: "Demo123!" },
+  admin: { email: "admin@supervisor-match.local", password: "Admin123!" },
 }
 
 export function LoginForm() {
@@ -88,15 +88,6 @@ export function LoginForm() {
       setError("Network error. Please try again.")
       setIsLoading(false)
     }
-  }
-
-  const handleDemoQuickLogin = (role: UserRole) => {
-    // Demo mode: skip API, go straight to mock dashboard
-    localStorage.setItem("userRole", role)
-    localStorage.setItem("userEmail", demoCredentials[role].email)
-    localStorage.removeItem("impersonationActive")
-    localStorage.removeItem("impersonationAdminToken")
-    router.push(`/dashboard/${role}`)
   }
 
   return (
@@ -178,14 +169,14 @@ export function LoginForm() {
           </div>
 
           <p className="mb-2 text-center text-xs text-muted-foreground">
-            Fill credentials to login via API, or skip to a demo dashboard:
+            Click a role to autofill credentials, then sign in:
           </p>
           <div className="grid grid-cols-3 gap-2">
             <Button
               type="button"
               variant={selectedDemoRole === "student" ? "default" : "outline"}
               size="sm"
-              onClick={() => handleDemoQuickLogin("student")}
+              onClick={() => handleDemoLogin("student")}
               className="text-xs"
             >
               Student Demo
@@ -194,7 +185,7 @@ export function LoginForm() {
               type="button"
               variant={selectedDemoRole === "supervisor" ? "default" : "outline"}
               size="sm"
-              onClick={() => handleDemoQuickLogin("supervisor")}
+              onClick={() => handleDemoLogin("supervisor")}
               className="text-xs"
             >
               Supervisor Demo
@@ -203,7 +194,7 @@ export function LoginForm() {
               type="button"
               variant={selectedDemoRole === "admin" ? "default" : "outline"}
               size="sm"
-              onClick={() => handleDemoQuickLogin("admin")}
+              onClick={() => handleDemoLogin("admin")}
               className="text-xs"
             >
               Admin Demo

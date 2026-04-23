@@ -132,6 +132,23 @@ function splitCsv(value: string | null | undefined): string[] {
     .filter(Boolean)
 }
 
+function normalizeKeywordTokens(values: string[]) {
+  const seen = new Set<string>()
+  const tokens: string[] = []
+
+  values.forEach((value) => {
+    const cleaned = value.trim().replace(/\s+/g, " ")
+    if (!cleaned) return
+
+    const key = cleaned.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    tokens.push(cleaned)
+  })
+
+  return tokens
+}
+
 const fallbackShellUser: User = {
   id: "student",
   email: "student@example.com",
@@ -154,7 +171,8 @@ export default function StudentProjectPage() {
 
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-  const [keywords, setKeywords] = useState("")
+  const [keywordInput, setKeywordInput] = useState("")
+  const [keywordTags, setKeywordTags] = useState<string[]>([])
   const [status, setStatus] = useState("draft")
 
   const fetchProjectAndProfile = useCallback(
@@ -227,7 +245,8 @@ export default function StudentProjectPage() {
         if (shouldSyncEditorFields) {
           setTitle(dbProject?.title || "")
           setDescription(dbProject?.description || "")
-          setKeywords(dbProject?.keywords || "")
+          setKeywordTags(splitCsv(dbProject?.keywords))
+          setKeywordInput("")
           setStatus(dbProject?.status || "draft")
         }
 
@@ -272,22 +291,54 @@ export default function StudentProjectPage() {
     }
 
     void fetchProjectAndProfile()
-    const interval = window.setInterval(() => {
-      void fetchProjectAndProfile({
-        silent: true,
-        syncEditorFields: !isEditing,
-      })
-    }, 10000)
+    const interval =
+      isEditing
+        ? null
+        : window.setInterval(() => {
+            void fetchProjectAndProfile({
+              silent: true,
+              syncEditorFields: true,
+            })
+          }, 10000)
 
     window.addEventListener("focus", refreshOnVisible)
     document.addEventListener("visibilitychange", refreshOnVisible)
 
     return () => {
-      window.clearInterval(interval)
+      if (interval) {
+        window.clearInterval(interval)
+      }
       window.removeEventListener("focus", refreshOnVisible)
       document.removeEventListener("visibilitychange", refreshOnVisible)
     }
   }, [fetchProjectAndProfile, isEditing])
+
+  const addKeywordTokens = (raw: string) => {
+    const parsed = raw
+      .split(/[\n,;/]/)
+      .map((token) => token.trim())
+      .filter(Boolean)
+
+    if (parsed.length === 0) return
+
+    setKeywordTags((prev) => normalizeKeywordTokens([...prev, ...parsed]))
+    setKeywordInput("")
+  }
+
+  const removeKeyword = (keyword: string) => {
+    const key = keyword.trim().toLowerCase()
+    setKeywordTags((prev) => prev.filter((entry) => entry.toLowerCase() !== key))
+  }
+
+  const handleCancelEdit = () => {
+    setTitle(project?.title || "")
+    setDescription(project?.description || "")
+    setKeywordTags(splitCsv(project?.keywords))
+    setKeywordInput("")
+    setStatus(project?.status || "draft")
+    setIsEditing(false)
+    setError("")
+  }
 
   const handleSave = async () => {
     try {
@@ -303,7 +354,7 @@ export default function StudentProjectPage() {
         body: JSON.stringify({
           title,
           description,
-          keywords,
+          keywords: keywordTags,
           status,
         }),
       })
@@ -315,32 +366,30 @@ export default function StudentProjectPage() {
       }
 
       setProject(data.project)
+      setKeywordTags(splitCsv(data.project?.keywords))
+      setKeywordInput("")
       setStatus(data.project?.status || "draft")
       setIsEditing(false)
       setJustSaved(true)
       setError("")
       window.setTimeout(() => setJustSaved(false), 2200)
       void fetchProjectAndProfile({ silent: true })
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      setError("Could not save your project changes.")
+      setError(err?.message || "Could not save your project changes.")
     }
   }
 
   const currentProject: ProjectCardProject | null =
-    title || description || keywords
+    title || description || keywordTags.length > 0
       ? {
           id: project?.id || "db-project",
           studentId: project?.studentId || shellUser.id,
           title: title || "Untitled Project",
           abstract: description || "No project abstract yet.",
           description: description || "No project description yet.",
-          keywords: keywords
-            ? keywords.split(",").map((k) => k.trim()).filter(Boolean)
-            : [],
-          expertiseTags: keywords
-            ? keywords.split(",").map((k) => k.trim()).filter(Boolean)
-            : [],
+          keywords: keywordTags,
+          expertiseTags: keywordTags,
           status: normalizeProjectStatus(status),
           createdAt: project?.createdAt || new Date().toISOString(),
           updatedAt: project?.updatedAt || new Date().toISOString(),
@@ -497,7 +546,7 @@ export default function StudentProjectPage() {
 
                   {isEditing ? (
                     <>
-                      <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>
+                      <Button variant="outline" size="sm" onClick={handleCancelEdit}>
                         <X className="mr-1 h-4 w-4" />
                         Cancel
                       </Button>
@@ -529,15 +578,67 @@ export default function StudentProjectPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="project-keywords">Keywords</Label>
-                  <Input
-                    id="project-keywords"
-                    value={keywords}
-                    onChange={(e) => setKeywords(e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="e.g. AI, NLP, scheduling, recommender systems"
-                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {keywordTags.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        No keywords yet.
+                      </p>
+                    )}
+                    {keywordTags
+                      .filter(
+                        (keyword, index, all) =>
+                          all.findIndex(
+                            (item) =>
+                              item.trim().toLowerCase() ===
+                              keyword.trim().toLowerCase()
+                          ) === index
+                      )
+                      .map((keyword) => (
+                      <Badge
+                        key={keyword.trim().toLowerCase()}
+                        variant="secondary"
+                        className="gap-1 pr-1 text-xs"
+                      >
+                        {keyword}
+                        {isEditing && (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${keyword}`}
+                            onClick={() => removeKeyword(keyword)}
+                            className="rounded-full p-0.5 transition-colors hover:bg-background"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      id="project-keywords"
+                      value={keywordInput}
+                      onChange={(e) => setKeywordInput(e.target.value)}
+                      disabled={!isEditing}
+                      placeholder="Type a keyword and press Enter (or comma)"
+                      onKeyDown={(e) => {
+                        if (!isEditing) return
+                        if (e.key === "Enter" || e.key === ",") {
+                          e.preventDefault()
+                          addKeywordTokens(keywordInput)
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!isEditing || !keywordInput.trim()}
+                      onClick={() => addKeywordTokens(keywordInput)}
+                    >
+                      Add
+                    </Button>
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    Separate keywords with commas.
+                    You can add multiple keywords. Commas are supported.
                   </p>
                 </div>
 

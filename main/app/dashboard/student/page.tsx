@@ -535,8 +535,20 @@ export default function StudentDashboardPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      {project.keywords.map((kw) => (
-                        <Badge key={kw} variant="secondary" className="font-normal">
+                      {project.keywords
+                        .filter(
+                          (kw, index, all) =>
+                            all.findIndex(
+                              (item) =>
+                                item.trim().toLowerCase() === kw.trim().toLowerCase()
+                            ) === index
+                        )
+                        .map((kw) => (
+                        <Badge
+                          key={kw.trim().toLowerCase()}
+                          variant="secondary"
+                          className="font-normal"
+                        >
                           {kw}
                         </Badge>
                       ))}

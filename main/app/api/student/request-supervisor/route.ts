@@ -118,16 +118,6 @@ export async function POST(req: Request) {
 
     const activePeriod = await getActiveAcademicPeriod(prisma)
 
-    if (!activePeriod) {
-      return NextResponse.json(
-        {
-          error:
-            "No active academic period is configured. Ask an admin to activate one before sending requests.",
-        },
-        { status: 400 }
-      )
-    }
-
     if (project.academicPeriod?.isArchived) {
       return NextResponse.json(
         {
@@ -138,10 +128,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const effectiveProjectPeriodId =
-      project.academicPeriodId || activePeriod.id
-
-    if (!project.academicPeriodId) {
+    if (!project.academicPeriodId && activePeriod?.id) {
       await prisma.project.update({
         where: {
           id: project.id,
@@ -152,7 +139,14 @@ export async function POST(req: Request) {
       })
     }
 
-    if (effectiveProjectPeriodId !== activePeriod.id) {
+    const effectiveProjectPeriodId =
+      project.academicPeriodId || activePeriod?.id || null
+
+    if (
+      activePeriod?.id &&
+      effectiveProjectPeriodId &&
+      effectiveProjectPeriodId !== activePeriod.id
+    ) {
       return NextResponse.json(
         {
           error:
@@ -163,13 +157,15 @@ export async function POST(req: Request) {
     }
 
     if (
-      activePeriod.requestSupervisorCutoffAt &&
-      new Date() > activePeriod.requestSupervisorCutoffAt
+      (project.academicPeriod?.requestSupervisorCutoffAt ||
+        activePeriod?.requestSupervisorCutoffAt) &&
+      new Date() >
+        (project.academicPeriod?.requestSupervisorCutoffAt ||
+          activePeriod?.requestSupervisorCutoffAt)!
     ) {
       return NextResponse.json(
         {
-          error:
-            "The supervisor request cut-off date has passed for the active academic period.",
+          error: "The supervisor request cut-off date has passed.",
         },
         { status: 400 }
       )
@@ -200,7 +196,7 @@ export async function POST(req: Request) {
         studentId: payload.sub,
         supervisorId,
         projectId: project.id,
-        academicPeriodId: activePeriod.id,
+        academicPeriodId: effectiveProjectPeriodId,
         status: "pending",
         message,
       },

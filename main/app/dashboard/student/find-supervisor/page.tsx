@@ -39,10 +39,12 @@ type ApiMatch = {
     email: string
     expertise: string[]
     maxCapacity: number
+    assignedStudents?: number
     requestStatus?: string | null
   }
   matchScore: number
   matchReasons: string[]
+  source?: "rule_based" | "gemini"
 }
 
 type MatchingResponse = {
@@ -51,6 +53,9 @@ type MatchingResponse = {
     status?: string | null
   }
   matches?: ApiMatch[]
+  settings?: {
+    aiExplanationEnabled?: boolean
+  }
 }
 
 type ProfileResponse = {
@@ -89,6 +94,7 @@ export default function FindSupervisorPage() {
   const [studentInterests, setStudentInterests] = useState<string[]>([])
   const [projectKeywords, setProjectKeywords] = useState<string[]>([])
   const [projectStatus, setProjectStatus] = useState<string | null>(null)
+  const [matchingUsesAi, setMatchingUsesAi] = useState(false)
   const [workingId, setWorkingId] = useState("")
   const { toast } = useToast()
 
@@ -166,13 +172,14 @@ export default function FindSupervisorPage() {
             expertise: m.supervisor.expertise,
             researchAreas: m.supervisor.expertise,
             maxStudents: m.supervisor.maxCapacity,
-            currentStudents: 0,
+            currentStudents: m.supervisor.assignedStudents ?? 0,
             pastProjects: [],
             bio: "Profile details will be expanded when full supervisor records are connected.",
           },
           matchScore: m.matchScore,
           matchReasons: m.matchReasons,
           similarProjects: [],
+          source: m.source || "rule_based",
         }))
 
         const statuses = apiMatches.reduce<Record<string, string>>((acc, m) => {
@@ -188,6 +195,10 @@ export default function FindSupervisorPage() {
         setStudentInterests(splitCsv(profileData.profile?.interests))
         setProjectKeywords(matchingData.project?.keywords || [])
         setProjectStatus(matchingData.project?.status || null)
+        setMatchingUsesAi(
+          apiMatches.some((entry) => entry.source === "gemini") &&
+            Boolean(matchingData.settings?.aiExplanationEnabled)
+        )
         setError("")
       } catch (err: any) {
         console.error(err)
@@ -425,6 +436,11 @@ export default function FindSupervisorPage() {
                   abstract. Review the &quot;why this match&quot; reasons before
                   sending a request.
                 </p>
+                <p className="text-xs text-muted-foreground">
+                  {matchingUsesAi
+                    ? "Gemini explanations are enabled for these recommendations."
+                    : "Recommendations are currently using rule-based scoring (AI may be disabled or Gemini is unavailable)."}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -641,8 +657,8 @@ export default function FindSupervisorPage() {
                       3
                     </span>
                     <span className="leading-relaxed">
-                      Later, this scoring will be upgraded into a stronger AI/NLP
-                      matching engine.
+                      Gemini refines the top candidates and generates specific
+                      &quot;why this match&quot; explanations when AI is enabled.
                     </span>
                   </li>
                 </ol>

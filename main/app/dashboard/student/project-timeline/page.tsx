@@ -91,6 +91,7 @@ export default function StudentProjectTimelinePage() {
 
   const [aiAdvice, setAiAdvice] = useState("")
   const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState("")
 
   const [newTitle, setNewTitle] = useState("")
   const [newDescription, setNewDescription] = useState("")
@@ -134,6 +135,8 @@ export default function StudentProjectTimelinePage() {
     try {
       setAiLoading(true)
       setError("")
+      setAiError("")
+      setAiAdvice("")
 
       const token = localStorage.getItem("token")
 
@@ -155,7 +158,7 @@ export default function StudentProjectTimelinePage() {
       setAiAdvice(data.suggestion || "")
     } catch (err: any) {
       console.error(err)
-      setError(err?.message || "AI failed to generate advice.")
+      setAiError(err?.message || "AI failed to generate advice.")
     } finally {
       setAiLoading(false)
     }
@@ -722,8 +725,12 @@ export default function StudentProjectTimelinePage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <Button onClick={getAiAdvice} disabled={aiLoading}>
-                  {aiLoading ? "Generating..." : "Get AI Advice"}
+                  {aiLoading ? "Generating..." : "Get AI Project Advice"}
                 </Button>
+
+                {aiError && (
+                  <p className="text-sm text-destructive">{aiError}</p>
+                )}
 
                 {aiAdvice && (
                   <p className="whitespace-pre-line text-sm text-muted-foreground">

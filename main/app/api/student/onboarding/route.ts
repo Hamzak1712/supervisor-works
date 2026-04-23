@@ -659,18 +659,16 @@ export async function POST(req: Request) {
       })
     } else {
       const activePeriod = await getActiveAcademicPeriod(prisma)
-      if (activePeriod?.id) {
-        project = await prisma.project.create({
-          data: {
-            studentId: payload.sub,
-            academicPeriodId: activePeriod.id,
-            title: deriveTitle(projectIdea),
-            description: generatedDescription,
-            keywords: generatedKeywords,
-            status: "draft",
-          },
-        })
-      }
+      project = await prisma.project.create({
+        data: {
+          studentId: payload.sub,
+          academicPeriodId: activePeriod?.id ?? null,
+          title: deriveTitle(projectIdea),
+          description: generatedDescription,
+          keywords: generatedKeywords,
+          status: "draft",
+        },
+      })
     }
 
     return NextResponse.json(
