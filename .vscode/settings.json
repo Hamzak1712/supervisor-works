@@ -1,9 +1,9 @@
 {
-  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.tsdk": "main/node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "eslint.workingDirectories": [
     {
-      "directory": ".",
+      "directory": "main",
       "changeProcessCWD": true
     }
   ]

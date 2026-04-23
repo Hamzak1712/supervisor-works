@@ -94,8 +94,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
             <span>Keywords</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {uniqueKeywords.map((keyword) => (
-              <Badge key={keyword.toLowerCase()} variant="secondary">
+            {uniqueKeywords.map((keyword, index) => (
+              <Badge key={`${keyword.toLowerCase()}-${index}`} variant="secondary">
                 {keyword}
               </Badge>
             ))}
@@ -105,9 +105,9 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Expertise Tags</p>
           <div className="flex flex-wrap gap-2">
-            {uniqueExpertiseTags.map((tag) => (
+            {uniqueExpertiseTags.map((tag, index) => (
               <Badge
-                key={tag.toLowerCase()}
+                key={`${tag.toLowerCase()}-${index}`}
                 variant="outline"
                 className="border-primary/30 text-primary"
               >

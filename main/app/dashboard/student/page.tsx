@@ -750,8 +750,8 @@ export default function StudentDashboardPage() {
 
                     {supervisor.expertise && (
                       <div className="flex flex-wrap gap-1.5">
-                        {supervisor.expertise.split(",").map((e: string) => (
-                          <Badge key={e} variant="secondary" className="text-xs">
+                        {supervisor.expertise.split(",").map((e: string, index: number) => (
+                          <Badge key={`${e.trim().toLowerCase()}-${index}`} variant="secondary" className="text-xs">
                             {e.trim()}
                           </Badge>
                         ))}
@@ -801,8 +801,8 @@ export default function StudentDashboardPage() {
                     <div className="flex flex-wrap gap-1.5">
                       {splitCsv(supervisor.expertise)
                         .slice(0, 4)
-                        .map((e) => (
-                          <Badge key={e} variant="secondary" className="font-normal">
+                        .map((e, index) => (
+                          <Badge key={`${e.trim().toLowerCase()}-${index}`} variant="secondary" className="font-normal">
                             {e}
                           </Badge>
                         ))}

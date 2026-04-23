@@ -796,9 +796,9 @@ export default function StudentProjectPage() {
                       Expertise
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {splitCsv(supervisor.expertise).slice(0, 4).map((item) => (
+                      {splitCsv(supervisor.expertise).slice(0, 4).map((item, index) => (
                         <Badge
-                          key={item}
+                          key={`${item.trim().toLowerCase()}-${index}`}
                           variant="secondary"
                           className="text-[10px]"
                         >
