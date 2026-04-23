@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   MessageSquare,
@@ -91,7 +91,7 @@ function formatDate(dateStr: string) {
   })
 }
 
-export default function SupervisorFeedbackPage() {
+function SupervisorFeedbackPageContent() {
   const searchParams = useSearchParams()
   const selectedStudentId = searchParams.get("studentId") || ""
 
@@ -419,5 +419,23 @@ export default function SupervisorFeedbackPage() {
         )}
       </div>
     </DashboardShell>
+  )
+}
+
+export default function SupervisorFeedbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardShell
+          user={fallbackUser}
+          role="supervisor"
+          title="Milestone Feedback"
+        >
+          <div className="p-6 text-sm text-muted-foreground">Loading feedback...</div>
+        </DashboardShell>
+      }
+    >
+      <SupervisorFeedbackPageContent />
+    </Suspense>
   )
 }

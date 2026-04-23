@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Send, MessageSquare } from "lucide-react"
 
@@ -27,7 +27,7 @@ function formatDateTime(dateStr: string) {
   })
 }
 
-export default function MessagesPage() {
+function MessagesPageContent() {
   const searchParams = useSearchParams()
   const otherUserId = searchParams.get("userId") || ""
   const otherUserName = searchParams.get("name") || "Conversation"
@@ -222,5 +222,19 @@ export default function MessagesPage() {
         </Card>
       </div>
     </DashboardShell>
+  )
+}
+
+export default function MessagesPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardShell user={currentStudent} role="student" title="Messages">
+          <div className="p-6 text-sm text-muted-foreground">Loading messages...</div>
+        </DashboardShell>
+      }
+    >
+      <MessagesPageContent />
+    </Suspense>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   Calendar,
@@ -84,7 +84,7 @@ function toDatetimeLocalValue(date: Date) {
   )}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-export default function MeetingsPage() {
+function MeetingsPageContent() {
   const searchParams = useSearchParams()
   const otherUserId = searchParams.get("userId") || ""
   const otherUserName = searchParams.get("name") || "Meetings"
@@ -528,5 +528,19 @@ export default function MeetingsPage() {
         </Card>
       </div>
     </DashboardShell>
+  )
+}
+
+export default function MeetingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardShell user={fallbackUser} role="student" title="Meetings">
+          <div className="p-6 text-sm text-muted-foreground">Loading meetings...</div>
+        </DashboardShell>
+      }
+    >
+      <MeetingsPageContent />
+    </Suspense>
   )
 }
